@@ -11,11 +11,13 @@
 //!   emlbox tagdb insert|query|bench <db> [...]
 //!   emlbox mkdb <path> <entity>      (X-EML-Type: Database/KV)
 //!   emlbox mkmem <path> <entity>     (X-EML-Type: AI/MemoryBank)
+//!   emlbox pack <dir> <out.eml> [entity]
+//!   emlbox unpack <container> <out-dir>
 //!   emlbox verify <path>
 //!   emlbox demo <path> [--big]
 //!   emlbox bench <dir>
 
-use emlbox::{bench, demo, fs, ipc, kv, reader, runner, tagdb, verify, writer};
+use emlbox::{bench, demo, fs, ipc, kv, pack, reader, runner, tagdb, verify, writer};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -32,6 +34,8 @@ fn main() {
         Some("tagdb") => cmd_tagdb(&args[2..]),
         Some("mkdb") => cmd_mkdb(&args[2..]),
         Some("mkmem") => cmd_mkmem(&args[2..]),
+        Some("pack") => cmd_pack(&args[2..]),
+        Some("unpack") => cmd_unpack(&args[2..]),
         Some("append") => cmd_append(&args[2..]),
         Some("verify") => cmd_verify(&args[2..]),
         Some("demo") => cmd_demo(&args[2..]),
@@ -515,6 +519,46 @@ fn cmd_mkmem(a: &[String]) -> i32 {
     match demo::build_mem(&path, &entity) {
         Ok(()) => {
             println!("AI/MemoryBank built: {}", path.display());
+            0
+        }
+        Err(e) => err(&e),
+    }
+}
+
+fn cmd_pack(a: &[String]) -> i32 {
+    let dir = match path_arg(a, 0, "dir") {
+        Ok(p) => p,
+        Err(e) => return err(&e),
+    };
+    let out = match path_arg(a, 1, "out.eml") {
+        Ok(p) => p,
+        Err(e) => return err(&e),
+    };
+    let entity = a
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "pack@system.local".to_string());
+    match pack::pack(&dir, &out, &entity) {
+        Ok((n, bytes)) => {
+            println!("packed {n} file(s), {bytes} bytes -> {}", out.display());
+            0
+        }
+        Err(e) => err(&e),
+    }
+}
+
+fn cmd_unpack(a: &[String]) -> i32 {
+    let container = match path_arg(a, 0, "container") {
+        Ok(p) => p,
+        Err(e) => return err(&e),
+    };
+    let out = match path_arg(a, 1, "out-dir") {
+        Ok(p) => p,
+        Err(e) => return err(&e),
+    };
+    match pack::unpack(&container, &out) {
+        Ok(n) => {
+            println!("unpacked {n} file(s) -> {}", out.display());
             0
         }
         Err(e) => err(&e),

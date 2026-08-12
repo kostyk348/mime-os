@@ -7,6 +7,7 @@ pub mod format;
 pub mod fs;
 pub mod ipc;
 pub mod kv;
+pub mod pack;
 pub mod query;
 pub mod reader;
 pub mod runner;

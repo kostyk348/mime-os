@@ -92,6 +92,8 @@ emlbox fs index|ls|query|mkdir|dir|tag <store> [...]
 emlbox tagdb insert|query|bench <db> [...]
 emlbox mkdb <path> [entity]          # X-EML-Type: Database/KV
 emlbox mkmem <path> [entity]         # X-EML-Type: AI/MemoryBank
+emlbox pack <dir> <out.eml> [entity] # директория -> один .eml (вместо zip/tar)
+emlbox unpack <container> <out-dir>  # .eml -> файлы (защита от path traversal)
 emlbox append <path> <delta-json-file>
 emlbox verify <path>
 emlbox demo <path> [--big]
@@ -147,6 +149,14 @@ emlbox fs dir store games                          # → динамически�
 ### 5. Универсальный переносимый контейнер (вместо zip/apk/vpk)
 
 Любой артефакт — проект, бэкап, конфигурация сервиса — упаковывается в один самодокументируемый `.eml` с типом, тегами, кодом и данными. Читается через 100 лет (MIME — международный стандарт), открывается текстовым редактором, верифицируется hash-chain.
+
+```bash
+emlbox pack ./project app.eml my_project   # вся папка -> один .eml (структура в путях секций)
+emlbox unpack app.eml ./restored          # обратно, байт-в-байт
+emlbox verify app.eml                     # целостность
+```
+
+`unpack` отвергает абсолютные пути и `..` (защита от path traversal) — контейнеры безопасно получать из сети.
 
 ### 6. IPC-шина как очередь задач между скриптами/сервисами
 
@@ -238,7 +248,7 @@ OP: ==  !=  >=  <=  >  <
 ## Тесты
 
 ```bash
-cargo test    # 29 тестов: инварианты формата, IPC+Runner, FS, tagdb, X-Query
+cargo test    # 34 теста: инварианты формата, IPC+Runner, FS, tagdb, pack, X-Query
 ```
 
 ## Лицензия
