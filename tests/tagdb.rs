@@ -83,6 +83,20 @@ fn insert_is_atomic_no_tmp_left() {
 }
 
 #[test]
+fn insert_rejects_unsafe_ids() {
+    let db = setup("unsafeid");
+    let r = tagdb::insert(&db, "../../etc/passwd", &[], "", 0, &json!({}));
+    assert!(r.is_err(), "path traversal id must be rejected");
+    let r = tagdb::insert(&db, "a/b", &[], "", 0, &json!({}));
+    assert!(r.is_err());
+    let r = tagdb::insert(&db, "..", &[], "", 0, &json!({}));
+    assert!(r.is_err());
+    let r = tagdb::insert(&db, "ok_id_1", &[], "", 0, &json!({}));
+    assert!(r.is_ok());
+    assert!(!db.join("..").join("etc").exists());
+}
+
+#[test]
 fn x_query_numeric_operators() {
     let h = vec![
         ("X-Timestamp".into(), "100".into()),

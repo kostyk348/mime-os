@@ -59,6 +59,16 @@ fn read_headers(p: &Path) -> Result<Vec<(String, String)>, String> {
 /// Atomic insert: write tmp + rename. A power cut can never leave a torn record.
 pub fn insert(db: &Path, id: &str, tags: &[String], device: &str, ts: u64, body: &Value) -> Result<PathBuf, String> {
     std::fs::create_dir_all(db).map_err(|e| e.to_string())?;
+    // id becomes a filename in db/ — must stay flat and inside the dir
+    if id.is_empty()
+        || id.contains('/')
+        || id.contains('\\')
+        || id == "."
+        || id == ".."
+        || id.contains("..")
+    {
+        return Err(format!("unsafe record id: {id:?} (must be a flat filename)"));
+    }
     let buf = record_bytes(id, tags, device, ts, body)?;
     let tmp = db.join(format!("{id}.eml.tmp"));
     let final_path = db.join(format!("{id}.eml"));
