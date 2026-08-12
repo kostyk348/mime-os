@@ -1,0 +1,186 @@
+//! Writer: single-pass container build (create) + append-only delta log.
+//!
+//! create: assembles envelope + multipart + head index + empty tail index + trailer
+//! into one byte buffer with exact absolute offsets (index-driven, no rescan).
+//!
+//! append: writes a delta block *before* the tail index, then rewrites only
+//! [tail index .. EOF] — the base prefix never moves.
+
+use crate::format::*;
+use crate::reader::EmlBox;
+use std::fs::OpenOptions;
+use std::io::{Seek, SeekFrom, Write};
+use std::path::Path;
+
+#[derive(Clone)]
+pub struct Part {
+    pub id: String,
+    pub ct: String,
+    pub name: String,
+    pub enc: String,
+    pub data: Vec<u8>,
+}
+
+impl Part {
+    pub fn raw(id: &str, ct: &str, name: &str, data: Vec<u8>) -> Self {
+        Part {
+            id: id.to_string(),
+            ct: ct.to_string(),
+            name: name.to_string(),
+            enc: ENC_RAW.to_string(),
+            data,
+        }
+    }
+}
+
+/// Build a new container. Returns the absolute offset of the head index payload.
+pub fn build_file(path: &Path, entity: &str, subject: &str, parts: Vec<Part>) -> Result<(), String> {
+    build_file_with_headers(path, entity, subject, "X-EML-Type: Application/Unified\r\n", parts)
+}
+
+/// Build with extra envelope header lines (e.g. X-EML-Type: System/Directory,
+/// X-Query, X-Contains-ID, X-Tag). Extra lines go before X-EML-Version.
+pub fn build_file_with_headers(
+    path: &Path,
+    entity: &str,
+    subject: &str,
+    extra_headers: &str,
+    parts: Vec<Part>,
+) -> Result<(), String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let boundary = format!("EMLBOX_v1_{nanos:016x}");
+
+    // Envelope prefix is deterministic; index lines are fixed 20-char fields.
+    let pre = format!(
+        "From: <{entity}@system.local>\r\nTo: <kernel@system.local>\r\nSubject: {subject}\r\n\
+         X-Entity-ID: {entity}\r\n{extra_headers}X-EML-Version: {VERSION}\r\n"
+    );
+    // "X-Index-Offset: " = 16 chars + 20 + \r\n(2) = 38; two lines = 76
+    let head_fixed = pre.len() + 76 + format!("Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n").len();
+
+    // ---- assemble body (data sections + head index), tracking absolute offsets
+    let mut body = Vec::new();
+    let mut sections = Vec::new();
+    let mut offs = 0usize; // relative to body start
+
+    for p in &parts {
+        let ph = format!(
+            "--{boundary}\r\nContent-Type: {}; name=\"{}\"\r\nContent-ID: <{}>\r\nX-Encoding: {}\r\n\r\n",
+            p.ct, p.name, p.id, p.enc
+        );
+        sections.push(SectionInfo {
+            id: p.id.clone(),
+            ct: p.ct.clone(),
+            name: p.name.clone(),
+            off: (head_fixed + offs + ph.len()) as u64,
+            len: p.data.len() as u64,
+            enc: p.enc.clone(),
+        });
+        body.extend_from_slice(ph.as_bytes());
+        body.extend_from_slice(&p.data);
+        offs += ph.len() + p.data.len();
+    }
+
+    let index = HeadIndex { v: 1, sections };
+    let idx_bytes = serde_json::to_vec(&index).map_err(|e| e.to_string())?;
+    let idx_ph = format!("--{boundary}\r\nContent-Type: {INDEX_CT}\r\nContent-ID: <eml-index>\r\nX-Encoding: raw\r\n\r\n");
+    let idx_off = (head_fixed + offs + idx_ph.len()) as u64;
+    let idx_len = idx_bytes.len() as u64;
+    body.extend_from_slice(idx_ph.as_bytes());
+    body.extend_from_slice(&idx_bytes);
+    offs += idx_ph.len() + idx_bytes.len();
+
+    let close = format!("--{boundary}--\r\n");
+    body.extend_from_slice(close.as_bytes());
+    offs += close.len();
+
+    // ---- tail index (empty at creation) + trailer
+    let tail_bytes = serde_json::to_vec(&TailIndex { v: 1, entries: vec![] }).map_err(|e| e.to_string())?;
+    let tail_off = (head_fixed + offs) as u64;
+
+    let env = format!(
+        "{pre}X-Index-Offset: {idx_off:020}\r\nX-Index-Length: {idx_len:020}\r\n\
+         Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n"
+    );
+
+    // base = everything up to the tail index (no deltas yet)
+    let mut full = Vec::new();
+    full.extend_from_slice(env.as_bytes());
+    full.extend_from_slice(&body);
+    let base_hash = hash_bytes(&full);
+    let trailer = render_trailer(entity, 0, &base_hash, "", tail_off, tail_bytes.len() as u64);
+    full.extend_from_slice(&tail_bytes);
+    full.extend_from_slice(&trailer);
+
+    std::fs::write(path, &full).map_err(|e| format!("write {path:?}: {e}"))?;
+    Ok(())
+}
+
+/// Low-level append of a raw delta block (any EOL style — offsets are byte-exact).
+/// Returns (new_seq, block_hash).
+pub fn append_block(path: &Path, block: &[u8]) -> Result<(u64, String), String> {
+    let b = EmlBox::open(path)?;
+    let entity = b.entity().ok_or("container has no X-Entity-ID")?;
+    let seq = b.tail.entries.len() as u64;
+
+    let block_hash = hash_bytes(block);
+    let mut entries = b.tail.entries.clone();
+    // Deltas stay contiguous: the next block goes right after the previous one.
+    // The first delta overwrites the empty tail index written at creation (it
+    // sits directly after base, so [0, delta1.off) == base region exactly).
+    let block_off = match b.tail.entries.last() {
+        Some(last) => last.off + last.len,
+        None => b.tail_index_off,
+    };
+    entries.push(TailEntry {
+        seq: seq + 1,
+        off: block_off,
+        len: block.len() as u64,
+        hash: block_hash.clone(),
+    });
+    let new_tail = TailIndex { v: 1, entries };
+    let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
+    let new_tail_off = block_off + block.len() as u64;
+    let trailer = render_trailer(
+        &entity,
+        seq + 1,
+        &b.base_hash,
+        &block_hash,
+        new_tail_off,
+        new_tail_bytes.len() as u64,
+    );
+
+    let mut f = OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(block_off)).map_err(|e| e.to_string())?;
+    f.write_all(block).map_err(|e| e.to_string())?;
+    f.write_all(&new_tail_bytes).map_err(|e| e.to_string())?;
+    f.write_all(&trailer).map_err(|e| e.to_string())?;
+    f.set_len(new_tail_off + new_tail_bytes.len() as u64 + TRAILER_SIZE as u64)
+        .map_err(|e| e.to_string())?;
+    f.sync_all().map_err(|e| e.to_string())?;
+    Ok((seq + 1, block_hash))
+}
+
+/// Build a CRLF delta block and append it. Returns (seq, hash).
+pub fn append_delta(path: &Path, delta: &Delta) -> Result<(u64, String), String> {
+    let b = EmlBox::open(path)?;
+    let entity = b.entity().ok_or("container has no X-Entity-ID")?;
+    let seq = b.tail.entries.len() as u64;
+    let prev_hash = if seq == 0 {
+        b.base_hash.clone()
+    } else {
+        b.tail.entries[(seq - 1) as usize].hash.clone()
+    };
+    let body = serde_json::to_vec(delta).map_err(|e| e.to_string())?;
+    let mut block = format!(
+        "X-EMLBox-Delta: v1\r\nX-Entity-ID: {entity}\r\nX-Delta-Seq: {}\r\nX-Prev-Hash: {prev_hash}\r\n\
+         Content-Type: {DELTA_CT}\r\n\r\n",
+        seq + 1
+    )
+    .into_bytes();
+    block.extend_from_slice(&body);
+    append_block(path, &block)
+}
