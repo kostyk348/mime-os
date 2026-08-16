@@ -17,7 +17,7 @@
 //!   emlbox demo <path> [--big]
 //!   emlbox bench <dir>
 
-use emlbox::{bench, demo, fs, ipc, kv, pack, reader, rev, runner, sync, tagdb, verify, writer};
+use emlbox::{bench, demo, fs, ipc, kv, mail, pack, reader, rev, runner, site, sync, tagdb, verify, writer};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -33,7 +33,9 @@ fn main() {
         Some("fs") => cmd_fs(&args[2..]),
         Some("tagdb") => cmd_tagdb(&args[2..]),
         Some("sync") => cmd_sync(&args[2..]),
+        Some("mail") => cmd_mail(&args[2..]),
         Some("rev") => cmd_rev(&args[2..]),
+        Some("site") => cmd_site(&args[2..]),
         Some("mkdb") => cmd_mkdb(&args[2..]),
         Some("mkmem") => cmd_mkmem(&args[2..]),
         Some("pack") => cmd_pack(&args[2..]),
@@ -65,6 +67,12 @@ fn cmd_create(a: &[String]) -> i32 {
     let subject = a.get(2).cloned().unwrap_or_default();
     let mut parts = Vec::new();
     let mut i = 3;
+    let enc = a
+        .iter()
+        .position(|x| x == "--enc")
+        .and_then(|i| a.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| emlbox::format::ENC_RAW.to_string());
     while i < a.len() {
         if a[i] == "--part" {
             let spec = match a.get(i + 1) {
@@ -79,7 +87,15 @@ fn cmd_create(a: &[String]) -> i32 {
                 Ok(d) => d,
                 Err(e) => return err(&format!("read {}: {e}", f[3])),
             };
-            parts.push(writer::Part::raw(f[0], f[1], f[2], data));
+            parts.push(writer::Part {
+                id: f[0].to_string(),
+                ct: f[1].to_string(),
+                name: f[2].to_string(),
+                enc: enc.clone(),
+                data,
+            });
+            i += 2;
+        } else if a[i] == "--enc" {
             i += 2;
         } else {
             return err(&format!("unexpected arg {}", a[i]));
@@ -133,7 +149,7 @@ fn cmd_get(a: &[String]) -> i32 {
     match reader::EmlBox::open(&path) {
         Ok(b) => match b.section(&id) {
             Some(data) => match out {
-                Some(p) => match std::fs::write(&p, data) {
+                Some(p) => match std::fs::write(&p, &data) {
                     Ok(()) => {
                         println!("wrote {} bytes to {}", data.len(), p.display());
                         0
@@ -145,7 +161,7 @@ fn cmd_get(a: &[String]) -> i32 {
                         .iter()
                         .all(|b| *b == b'\n' || *b == b'\r' || *b == b'\t' || (*b >= 0x20 && *b != 0x7f));
                     if printable {
-                        print!("{}", String::from_utf8_lossy(data));
+                        print!("{}", String::from_utf8_lossy(&data));
                     } else {
                         println!("<binary {}, {} bytes>", id, data.len());
                     }
@@ -661,6 +677,81 @@ fn cmd_rev(a: &[String]) -> i32 {
     }
 }
 
+fn cmd_mail(a: &[String]) -> i32 {
+    let sub = a.first().map(|s| s.as_str()).unwrap_or("");
+    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    match sub {
+        "pack" => {
+            // mail pack <container> --to addr [--writer W] [--since N] [--out file]
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let to = flag("--to").unwrap_or_default();
+            let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
+            let since: u64 = flag("--since").and_then(|s| s.parse().ok()).unwrap_or(0);
+            match mail::pack(&container, &writer, &to, since) {
+                Ok(bytes) => {
+                    let out = flag("--out").map(PathBuf::from).unwrap_or_else(|| {
+                        let p = PathBuf::from("outbox");
+                        let _ = std::fs::create_dir_all(&p);
+                        p.join(format!("sync_{}.eml", since))
+                    });
+                    match std::fs::write(&out, &bytes) {
+                        Ok(()) => {
+                            println!("picked {} bytes -> {}", bytes.len(), out.display());
+                            println!("отправь это письмо любым SMTP-клиентом; приём — mail receive из Maildir");
+                            0
+                        }
+                        Err(e) => err(&format!("write {}: {e}", out.display())),
+                    }
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "apply" => {
+            // mail apply <letter.eml> <container>
+            let letter = match path_arg(a, 1, "letter") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let container = match path_arg(a, 2, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match std::fs::read(&letter) {
+                Ok(bytes) => match mail::apply(&container, &bytes) {
+                    Ok((applied, pending)) => {
+                        println!("applied {applied}, pending {pending}");
+                        0
+                    }
+                    Err(e) => err(&e),
+                },
+                Err(e) => err(&format!("read {}: {e}", letter.display())),
+            }
+        }
+        "receive" => {
+            // mail receive <maildir> <container>
+            let maildir = match path_arg(a, 1, "maildir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let container = match path_arg(a, 2, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match mail::receive(&container, &maildir) {
+                Ok((applied, pending)) => {
+                    println!("applied {applied}, pending {pending}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        _ => err("mail subcommands: pack|apply|receive"),
+    }
+}
+
 fn cmd_sync(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
     let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
@@ -929,4 +1020,54 @@ fn cmd_bench(a: &[String]) -> i32 {
 fn err(e: &str) -> i32 {
     eprintln!("emlbox: {e}");
     1
+}
+
+fn cmd_site(a: &[String]) -> i32 {
+    let sub = a.first().map(|s| s.as_str()).unwrap_or("");
+    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    match sub {
+        "new" => {
+            // site new <file.eml> --title T [--tags a,b] [--src body.md]
+            let file = match path_arg(a, 1, "post file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let title = flag("--title").unwrap_or_else(|| "Untitled".to_string());
+            let tags: Vec<String> = flag("--tags")
+                .map(|t| t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .unwrap_or_default();
+            let body = match flag("--src") {
+                Some(src) => match std::fs::read_to_string(&src) {
+                    Ok(b) => b,
+                    Err(e) => return err(&format!("read {src}: {e}")),
+                },
+                None => String::new(),
+            };
+            match site::new_post(&file, &title, &tags, &body) {
+                Ok(()) => {
+                    println!("post created: {}", file.display());
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        _ => {
+            // site <posts-dir> <out-dir>
+            let posts = match path_arg(a, 0, "posts dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let out = match path_arg(a, 1, "out dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match site::build(&posts, &out) {
+                Ok(n) => {
+                    println!("site built: {n} постов -> {}", out.display());
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+    }
 }

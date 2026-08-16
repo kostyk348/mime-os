@@ -4,11 +4,18 @@ version = "0.1.0"
 edition = "2021"
 description = "EMLBox — single-file .eml container: mmap reader, two-level index, append-only delta log, KV client"
 
+[features]
+gui = ["dep:eframe"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 memmap2 = "0.9"
+flate2 = "1"
+aes-gcm = "0.10"
+rand = "0.8"
+eframe = { version = "0.29", optional = true, default-features = false, features = ["glow", "x11", "wayland", "default_fonts"] }
 
 [profile.release]
 opt-level = 3
@@ -16,3 +23,8 @@ opt-level = 3
 [[bin]]
 name = "rev-mcp"
 path = "src/bin/rev-mcp.rs"
+
+[[bin]]
+name = "emlbox-gui"
+path = "src/bin/emlbox-gui.rs"
+required-features = ["gui"]

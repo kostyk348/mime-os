@@ -73,6 +73,8 @@ pub fn build_file_with_headers(
     let mut offs = 0usize; // relative to body start
 
     for p in &parts {
+        // X-Encoding: raw|deflate|aes — секция хранится закодированной
+        let enc_data = crate::encoding::encode(&p.enc, &p.data).map_err(|e| format!("{}: {e}", p.id))?;
         let ph = format!(
             "--{boundary}\r\nContent-Type: {}; name=\"{}\"\r\nContent-ID: <{}>\r\nX-Encoding: {}\r\n\r\n",
             p.ct, p.name, p.id, p.enc
@@ -82,12 +84,12 @@ pub fn build_file_with_headers(
             ct: p.ct.clone(),
             name: p.name.clone(),
             off: (head_fixed + offs + ph.len()) as u64,
-            len: p.data.len() as u64,
+            len: enc_data.len() as u64,
             enc: p.enc.clone(),
         });
         body.extend_from_slice(ph.as_bytes());
-        body.extend_from_slice(&p.data);
-        offs += ph.len() + p.data.len();
+        body.extend_from_slice(&enc_data);
+        offs += ph.len() + enc_data.len();
     }
 
     let index = HeadIndex { v: 1, sections };
@@ -140,14 +142,20 @@ fn next_seq_prev(b: &EmlBox, writer: &str) -> (u64, String) {
 }
 
 /// Build a delta block for `writer` and append it. Returns (seq, block_hash).
+/// Если задан ключ (EMLBOX_KEY/EMLBOX_PASS) — тело блока шифруется aes-256-gcm
+/// (X-Encoding: aes), база целиком недоступна без ключа.
 pub fn append_delta_w(path: &Path, writer: &str, delta: &Delta) -> Result<(u64, String), String> {
     let b = EmlBox::open(path)?;
     let entity = b.entity().ok_or("container has no X-Entity-ID")?;
     let (seq, prev) = next_seq_prev(&b, writer);
     let body = serde_json::to_vec(delta).map_err(|e| e.to_string())?;
+    let (body, enc_hdr) = match crate::encoding::active_key()? {
+        Some(k) => (crate::encoding::encrypt_key(&k, &body)?, "X-Encoding: aes\r\n"),
+        None => (body, ""),
+    };
     let mut block = format!(
         "X-EMLBox-Delta: v1\r\nX-Entity-ID: {entity}\r\nX-Writer-ID: {writer}\r\n\
-         X-Delta-Seq: {seq}\r\nX-Prev-Hash: {prev}\r\nContent-Type: {DELTA_CT}\r\n\r\n"
+         X-Delta-Seq: {seq}\r\nX-Prev-Hash: {prev}\r\n{enc_hdr}Content-Type: {DELTA_CT}\r\n\r\n"
     )
     .into_bytes();
     block.extend_from_slice(&body);

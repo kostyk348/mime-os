@@ -13,9 +13,12 @@ use serde_json::Value;
 use std::path::Path;
 
 pub fn table(b: &EmlBox, table: &str) -> Result<Value, String> {
-    let mut out: Value = match b.section(table) {
-        Some(s) => serde_json::from_slice(s).map_err(|e| format!("base table {table}: {e}"))?,
-        None => Value::Object(serde_json::Map::new()),
+    let has_section = b.sections.iter().any(|s| s.id == table);
+    let mut out: Value = if has_section {
+        let raw = b.section_checked(table)?; // ошибка декодирования видна
+        serde_json::from_slice(&raw).map_err(|e| format!("base table {table}: {e}"))?
+    } else {
+        Value::Object(serde_json::Map::new())
     };
     // (ts, writer, seq, delta): stable sort по (ts, writer) → внутри писателя
     // при равных (ts, writer) сохраняется порядок вставки, а он по построению

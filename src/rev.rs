@@ -304,7 +304,7 @@ fn passing_param(dir: &Path, f: &str, callee: &str, arg_n: usize) -> Option<usiz
 fn body_of(dir: &Path, f: &str) -> Option<Vec<String>> {
     let b = EmlBox::open(&func_file(dir, f)).ok()?;
     let s = b.section("listing")?;
-    Some(String::from_utf8_lossy(s).lines().map(|l| l.trim().to_string()).collect())
+    Some(String::from_utf8_lossy(&s).lines().map(|l| l.trim().to_string()).collect())
 }
 
 /// Пролог -O0: "mov QWORD PTR [rbp-0x8],rdi" — спасённый параметр.
@@ -522,7 +522,7 @@ pub fn cluster(dir: &Path, pattern: &str) -> Result<Vec<String>, String> {
         let hay = format!(
             "{} {}",
             name,
-            b.section("listing").map(|s| String::from_utf8_lossy(s).to_string()).unwrap_or_default()
+            b.section("listing").map(|s| String::from_utf8_lossy(&s).to_string()).unwrap_or_default()
         )
         .to_ascii_lowercase();
         if hay.contains(&pat) {
@@ -680,7 +680,7 @@ fn replace_rip(m: &str) -> String {
 pub fn body_hash(dir: &Path, name: &str) -> Result<String, String> {
     let b = EmlBox::open(&func_file(dir, name))?;
     let body = b.section("listing").ok_or("no listing")?;
-    Ok(hash_bytes(normalize_body(&String::from_utf8_lossy(body)).as_bytes()))
+    Ok(hash_bytes(normalize_body(&String::from_utf8_lossy(&body)).as_bytes()))
 }
 
 /// Диффинг версий: какие функции изменились / добавились / удалились.

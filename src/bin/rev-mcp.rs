@@ -43,7 +43,7 @@ fn run_tool(name: &str, args: &Value) -> Result<Value, String> {
             }
             if let Some(body) = b.section("listing") {
                 out.push_str("\n--- listing ---\n");
-                out.push_str(&String::from_utf8_lossy(body));
+                out.push_str(&String::from_utf8_lossy(&body));
             }
             Ok(text(out))
         }

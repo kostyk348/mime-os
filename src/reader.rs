@@ -80,11 +80,21 @@ impl EmlBox {
     }
 
     /// Zero-copy payload slice for a base section.
-    pub fn section(&self, id: &str) -> Option<&[u8]> {
-        self.sections
+    /// Декодированное содержимое секции (X-Encoding: raw|deflate|aes).
+    /// None — секция не найдена ИЛИ ошибка декодирования.
+    pub fn section(&self, id: &str) -> Option<Vec<u8>> {
+        self.section_checked(id).ok()
+    }
+
+    /// Как section(), но ошибки декодирования не скрываются.
+    pub fn section_checked(&self, id: &str) -> Result<Vec<u8>, String> {
+        let s = self
+            .sections
             .iter()
             .find(|s| s.id == id)
-            .and_then(|s| slice(&self.mmap, s.off, s.len).ok())
+            .ok_or_else(|| format!("no section '{id}'"))?;
+        let raw = slice(&self.mmap, s.off, s.len)?;
+        crate::encoding::decode(&s.enc, raw)
     }
 
     /// Zero-copy slice of a delta block.

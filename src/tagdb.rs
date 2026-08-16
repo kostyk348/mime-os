@@ -212,7 +212,7 @@ pub fn bench(db: &Path, n: usize, body_kb: usize) -> Result<String, String> {
 
     let t = std::time::Instant::now();
     let b = crate::reader::EmlBox::open(&db.join("single.eml"))?;
-    let recs: Value = serde_json::from_slice(b.section("recs").unwrap()).map_err(|e| e.to_string())?;
+    let recs: Value = serde_json::from_slice(&b.section("recs").unwrap()).map_err(|e| e.to_string())?;
     let mut single_hit = 0usize;
     if let Value::Object(map) = &recs {
         for v in map.values() {

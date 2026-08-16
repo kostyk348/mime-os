@@ -209,13 +209,16 @@ pub fn block_header(block: &[u8], name: &str) -> Option<String> {
 }
 
 /// Parse a delta block body into a Delta. Returns Ok(None) for non-delta content.
+/// Учитывает X-Encoding: aes — тело расшифровывается (ключ из env).
 pub fn parse_delta_block(block: &[u8]) -> Result<Option<Delta>, String> {
     if block_header(block, "X-EMLBox-Delta").is_none() {
         return Ok(None);
     }
     let (end, sep) = find_blank(block).ok_or("delta: no blank line")?;
     let body = &block[end + sep..];
-    let delta: Delta = serde_json::from_slice(body).map_err(|e| format!("delta json: {e}"))?;
+    let enc = block_header(block, "X-Encoding").unwrap_or_else(|| ENC_RAW.to_string());
+    let body = crate::encoding::decode(&enc, body)?;
+    let delta: Delta = serde_json::from_slice(&body).map_err(|e| format!("delta json: {e}"))?;
     Ok(Some(delta))
 }
 

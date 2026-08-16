@@ -247,3 +247,19 @@ A применяет, A→B недостающие B блоки + DONE; B при
 `X-EML-Type: Reverse/Binary-Function`, `X-Callees:` (call-граф),
 `References:` (вызывающие, вычисляются при сборке), `X-Type-ArgN:` (волновые
 типы), секция `listing` (assembly). Типы распространяются BFS по References.
+
+## X-Encoding секций и дельт (v0.5)
+
+Секции: `X-Encoding: raw|deflate|aes`. deflate — zlib; aes — aes-256-gcm
+(nonce 12 байт + ciphertext, ключ из EMLBOX_KEY=64hex или EMLBOX_PASS=sha256).
+off/len/hash считаются по ЗАКОДИРОВАННЫМ байтам; verify хэширует шифр —
+целостность покрывает шифрование. Дельты: если ключ задан, тело блока
+шифруется (X-Encoding: aes в заголовке блока) — база целиком недоступна без
+ключа. kv/runner/fs автоматически работают с декодированными данными.
+
+## SMTP-мост (v0.5)
+
+`mail pack` — экспорт дельт писателя в multipart/mixed письмо
+(X-EMLBox-Sync: v1), блоки дословно. `mail apply` — применить из письма
+(идемпотентно). `mail receive` — Maildir (new/cur → processed/). Отправка
+наружу — любым MUA/SMTP-релеем, приём — из локального Maildir.

@@ -23,6 +23,10 @@
 | **Сеть (multi-writer sync)** | `sync export/push/pull/apply/heads` | delta-sync: per-writer chains, LWW merge, идемпотентная доставка, verify каждой цепочки |
 | **Сеть (TCP transport)** | `sync serve/connect` | P2P delta-sync по TCP (чистый std::net): манифесты, инкрементальная передача блоков |
 | **Клеточный реверс** | `rev <binary> <dir>`, `rev type/wave/cluster/graph/types/hash/diff` | objdump → .eml-граф функций, волна типов с call-site dataflow, кластеры, диффинг версий (без Ghidra) |
+| **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
+| **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
+| **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |
+| **GUI** | `emlbox-gui [file]` (feature `gui`) | egui-просмотрщик: секции, дельты по писателям, KV, verify |
 
 46 тестов зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
 
@@ -94,7 +98,11 @@ emlbox run <container> [--bus <dir>] [--once]
 emlbox sync export|push|pull|apply|heads <container> [--writer W] [--bus DIR] [--to ENTITY] [--since N]
 emlbox sync serve <container> --addr :9001 | sync connect <container> --peer host:port
 emlbox rev <binary> <dir>            # objdump -> .eml-граф функций
-emlbox rev type|wave|cluster|graph|types|hash <dir> [...]
+emlbox rev type|wave|cluster|graph|types|hash|diff <dir> [...]
+emlbox mail pack|apply|receive       # SMTP-мост: письма с дельтами
+emlbox site new <post.eml> --title T --tags a,b --src body.md
+emlbox site <posts> <out>            # сборка статического сайта
+emlbox-gui <file.eml>                # GUI (cargo build --features gui)
 emlbox fs index|ls|query|mkdir|dir|tag <store> [...]
 emlbox tagdb insert|query|bench <db> [...]
 emlbox mkdb <path> [entity]          # X-EML-Type: Database/KV
