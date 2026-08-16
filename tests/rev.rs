@@ -54,10 +54,13 @@ fn wave_propagates_types_up_the_graph() {
     rev::build(&dir, LISTING).unwrap();
     // такт 0: только net_send
     let hit = rev::type_mark(&dir, "net_send", "arg0", "Packet", 0).unwrap();
-    assert_eq!(hit, vec!["net_send".to_string()]);
-    // волна 2: player_move, main (вызывающие цепочкой)
+    assert_eq!(hit, vec!["net_send (arg0)".to_string()]);
+    // волна 2: player_move, main (вызывающие цепочкой, прямая передача)
     let hit = rev::type_mark(&dir, "net_send", "arg0", "Packet", 2).unwrap();
     assert_eq!(hit.len(), 3);
+    assert_eq!(hit[0], "net_send (arg0)");
+    assert!(hit.contains(&"main (arg0)".to_string()));
+    assert!(hit.contains(&"player_move (arg0)".to_string()));
     let tm = rev::type_map(&dir).unwrap();
     assert_eq!(tm.len(), 3);
     for (name, types) in &tm {

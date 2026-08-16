@@ -540,7 +540,7 @@ fn cmd_rev(a: &[String]) -> i32 {
                 Ok(hit) => {
                     println!("волна за {ticks} тактов достигла {} функций:", hit.len());
                     for f in &hit {
-                        println!("  [{f}] {arg}: {ty}");
+                        println!("  {f}");
                     }
                     0
                 }
@@ -607,6 +607,26 @@ fn cmd_rev(a: &[String]) -> i32 {
             match rev::body_hash(&dir, &func) {
                 Ok(h) => {
                     println!("{func}: {h}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "diff" => {
+            // rev diff <dirA> <dirB>
+            let dir_a = match path_arg(a, 1, "dirA") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let dir_b = match path_arg(a, 2, "dirB") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match rev::diff(&dir_a, &dir_b) {
+                Ok((changed, added, removed)) => {
+                    println!("changed ({}): {}", changed.len(), changed.join(", "));
+                    println!("added ({}): {}", added.len(), added.join(", "));
+                    println!("removed ({}): {}", removed.len(), removed.join(", "));
                     0
                 }
                 Err(e) => err(&e),

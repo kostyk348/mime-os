@@ -22,9 +22,9 @@
 | **eml-tag** | `tagdb insert/query/bench` | плоская теговая БД: header-only scan, corruption-proof |
 | **Сеть (multi-writer sync)** | `sync export/push/pull/apply/heads` | delta-sync: per-writer chains, LWW merge, идемпотентная доставка, verify каждой цепочки |
 | **Сеть (TCP transport)** | `sync serve/connect` | P2P delta-sync по TCP (чистый std::net): манифесты, инкрементальная передача блоков |
-| **Клеточный реверс** | `rev <binary> <dir>`, `rev type/wave/cluster/graph/types/hash` | objdump → .eml-граф функций, волновое распространение типов, семантические кластеры (без Ghidra) |
+| **Клеточный реверс** | `rev <binary> <dir>`, `rev type/wave/cluster/graph/types/hash/diff` | objdump → .eml-граф функций, волна типов с call-site dataflow, кластеры, диффинг версий (без Ghidra) |
 
-44 теста зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
+46 тестов зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
 
 ---
 
@@ -304,10 +304,11 @@ Apache-2.0.
 emlbox rev game.exe cells          # 13 функций -> cells/*.eml
 emlbox rev graph cells             # main -> player_move, player_take_damage, ...
 emlbox rev cluster cells player    # семантический поиск по имени+телу
-emlbox rev type cells net_send arg0 Packet      # пометить тип (такт 0)
-emlbox rev wave cells net_send arg0 Packet 2    # волна по References на 2 такта
+emlbox rev type cells net_send arg1 void*       # пометить тип (такт 0)
+emlbox rev wave cells net_send arg1 void* 3     # волна по References, call-site aware
 emlbox rev types cells             # карта типов по всему графу
-emlbox rev hash cells net_send     # дайджест тела (для диффинга версий)
+emlbox rev hash cells net_send     # дайджест нормализованного тела
+emlbox rev diff cells_v1 cells_v2  # changed/added/removed между версиями
 ```
 
 Клетка-функция:
@@ -321,9 +322,17 @@ X-Type-arg0: Packet                                         # волновой �
 Body: listing секция (assembly)
 ```
 
-Волна типов: пометили аргумент в одной функции → BFS по References
-(вызывающие держат тот же указатель) распространяет метку на N тактов.
-Прототип-ограничение: без анализа позиции аргумента на call-site.
-Дальше по плану: arg-анализ call-site, MCP-сервер (точечный контекст для LLM),
-диффинг версий по `rev hash`.
+Волна типов — **call-site aware**: мини-dataflow (mov/lea цепочки, слоты
+пролога `[rbp-0x8]=спасённый параметр`, `[rip+..]`-адреса). Вызывающая функция
+типизируется только если реально передаёт свой параметр в помеченный аргумент:
+`player_take_damage` передаёт свой `Player*` в `net_send.arg1` → типизируется,
+`main` передаёт локаль → честно пропущен.
+
+Диффинг версий нормализует тело (адреса, hex-байты, `[rip+ADDR]`, комментарии)
+→ ловит только реальные изменения кода.
+
+**MCP-сервер** для LLM: `target/release/rev-mcp` (stdio JSON-RPC, 8 тулов:
+get_function / get_callers / get_callees / cluster / wave / types / diff / graph).
+Модель читает только соседей клетки, а не весь листинг. Подключение в
+`opencode.json` как `"rev-mcp": { "command": "/path/rev-mcp" }`.
 

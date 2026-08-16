@@ -12,3 +12,7 @@ memmap2 = "0.9"
 
 [profile.release]
 opt-level = 3
+
+[[bin]]
+name = "rev-mcp"
+path = "src/bin/rev-mcp.rs"
