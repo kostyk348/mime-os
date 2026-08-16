@@ -21,8 +21,10 @@
 | **EML-FS** | `fs index/query/mkdir/dir/tag` | плоский диск + header-scan индекс + виртуальные директории |
 | **eml-tag** | `tagdb insert/query/bench` | плоская теговая БД: header-only scan, corruption-proof |
 | **Сеть (multi-writer sync)** | `sync export/push/pull/apply/heads` | delta-sync: per-writer chains, LWW merge, идемпотентная доставка, verify каждой цепочки |
+| **Сеть (TCP transport)** | `sync serve/connect` | P2P delta-sync по TCP (чистый std::net): манифесты, инкрементальная передача блоков |
+| **Клеточный реверс** | `rev <binary> <dir>`, `rev type/wave/cluster/graph/types/hash` | objdump → .eml-граф функций, волновое распространение типов, семантические кластеры (без Ghidra) |
 
-39 тестов зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
+44 теста зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
 
 ---
 
@@ -90,6 +92,9 @@ emlbox kv get|set|del|dump <path> <table> [key] [json]
 emlbox ipc send|list <bus> [<to> <event> [json]]
 emlbox run <container> [--bus <dir>] [--once]
 emlbox sync export|push|pull|apply|heads <container> [--writer W] [--bus DIR] [--to ENTITY] [--since N]
+emlbox sync serve <container> --addr :9001 | sync connect <container> --peer host:port
+emlbox rev <binary> <dir>            # objdump -> .eml-граф функций
+emlbox rev type|wave|cluster|graph|types|hash <dir> [...]
 emlbox fs index|ls|query|mkdir|dir|tag <store> [...]
 emlbox tagdb insert|query|bench <db> [...]
 emlbox mkdb <path> [entity]          # X-EML-Type: Database/KV
@@ -287,3 +292,38 @@ cargo test    # 39 тестов: инварианты формата, IPC+Runner
 ## Лицензия
 
 Apache-2.0.
+
+---
+
+## Клеточный реверс (без Ghidra/IDA)
+
+Бинарник → граф .eml-функций полным локальным конвейером: `objdump -d` (binutils)
+→ парсинг → каждая функция = отдельный .eml со своим call-графом.
+
+```bash
+emlbox rev game.exe cells          # 13 функций -> cells/*.eml
+emlbox rev graph cells             # main -> player_move, player_take_damage, ...
+emlbox rev cluster cells player    # семантический поиск по имени+телу
+emlbox rev type cells net_send arg0 Packet      # пометить тип (такт 0)
+emlbox rev wave cells net_send arg0 Packet 2    # волна по References на 2 такта
+emlbox rev types cells             # карта типов по всему графу
+emlbox rev hash cells net_send     # дайджест тела (для диффинга версий)
+```
+
+Клетка-функция:
+
+```
+From: <net_send@binary.target@system.local>
+Subject: net_send
+X-EML-Type: Reverse/Binary-Function
+References: fire_bullet, player_move, player_take_damage   # кто вызывает
+X-Type-arg0: Packet                                         # волновой тип
+Body: listing секция (assembly)
+```
+
+Волна типов: пометили аргумент в одной функции → BFS по References
+(вызывающие держат тот же указатель) распространяет метку на N тактов.
+Прототип-ограничение: без анализа позиции аргумента на call-site.
+Дальше по плану: arg-анализ call-site, MCP-сервер (точечный контекст для LLM),
+диффинг версий по `rev hash`.
+

@@ -17,7 +17,7 @@
 //!   emlbox demo <path> [--big]
 //!   emlbox bench <dir>
 
-use emlbox::{bench, demo, fs, ipc, kv, pack, reader, runner, sync, tagdb, verify, writer};
+use emlbox::{bench, demo, fs, ipc, kv, pack, reader, rev, runner, sync, tagdb, verify, writer};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -33,6 +33,7 @@ fn main() {
         Some("fs") => cmd_fs(&args[2..]),
         Some("tagdb") => cmd_tagdb(&args[2..]),
         Some("sync") => cmd_sync(&args[2..]),
+        Some("rev") => cmd_rev(&args[2..]),
         Some("mkdb") => cmd_mkdb(&args[2..]),
         Some("mkmem") => cmd_mkmem(&args[2..]),
         Some("pack") => cmd_pack(&args[2..]),
@@ -502,6 +503,144 @@ fn cmd_tagdb(a: &[String]) -> i32 {
     }
 }
 
+fn cmd_rev(a: &[String]) -> i32 {
+    let sub = a.first().map(|s| s.as_str()).unwrap_or("");
+    let _flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    match sub {
+        "type" => {
+            // rev type <dir> <func> arg0 <Type>  — пометить тип (depth 0)
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let func = a.get(2).cloned().unwrap_or_default();
+            let arg = a.get(3).cloned().unwrap_or_default();
+            let ty = a.get(4).cloned().unwrap_or_default();
+            match rev::type_mark(&dir, &func, &arg, &ty, 0) {
+                Ok(hit) => {
+                    for f in &hit {
+                        println!("  [{f}] {arg}: {ty}");
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "wave" => {
+            // rev wave <dir> <func> arg0 <Type> <ticks>  — волна на N тактов
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let func = a.get(2).cloned().unwrap_or_default();
+            let arg = a.get(3).cloned().unwrap_or_default();
+            let ty = a.get(4).cloned().unwrap_or_default();
+            let ticks: usize = a.get(5).and_then(|s| s.parse().ok()).unwrap_or(3);
+            match rev::type_mark(&dir, &func, &arg, &ty, ticks) {
+                Ok(hit) => {
+                    println!("волна за {ticks} тактов достигла {} функций:", hit.len());
+                    for f in &hit {
+                        println!("  [{f}] {arg}: {ty}");
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "cluster" => {
+            // rev cluster <dir> <pattern>
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let pat = a.get(2).cloned().unwrap_or_default();
+            match rev::cluster(&dir, &pat) {
+                Ok(hits) => {
+                    println!("{} совпадений по '{pat}':", hits.len());
+                    for h in &hits {
+                        println!("  {h}");
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "graph" => {
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match rev::graph(&dir) {
+                Ok(g) => {
+                    for (name, callees) in &g {
+                        println!("{name} -> {}", callees.join(", "));
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "types" => {
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match rev::type_map(&dir) {
+                Ok(t) => {
+                    if t.is_empty() {
+                        println!("типов пока нет — rev type <dir> <func> arg0 <Type>");
+                    }
+                    for (name, types) in &t {
+                        println!("{name}: {}", types.join(", "));
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "hash" => {
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let func = a.get(2).cloned().unwrap_or_default();
+            match rev::body_hash(&dir, &func) {
+                Ok(h) => {
+                    println!("{func}: {h}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        // emlbox rev <binary> <dir>  — полный конвейер: objdump -> .eml-граф
+        _ => {
+            let binary = match path_arg(a, 0, "binary") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match rev::analyze(&binary, &dir) {
+                Ok(n) => {
+                    println!("{n} функций -> {}", dir.display());
+                    match rev::graph(&dir) {
+                        Ok(g) => {
+                            for (name, callees) in &g {
+                                println!("  {name} -> {}", callees.join(", "));
+                            }
+                        }
+                        Err(e) => return err(&e),
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+    }
+}
+
 fn cmd_sync(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
     let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
@@ -596,7 +735,32 @@ fn cmd_sync(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
-        _ => err("sync subcommands: export|push|pull|apply|heads"),
+        "serve" => {
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let addr = flag("--addr").unwrap_or_else(|| "127.0.0.1:9001".to_string());
+            match sync::tcp_serve(&container, &addr) {
+                Ok(()) => 0,
+                Err(e) => err(&e),
+            }
+        }
+        "connect" => {
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let peer = flag("--peer").unwrap_or_else(|| "127.0.0.1:9001".to_string());
+            match sync::tcp_connect(&container, &peer) {
+                Ok((recv, sent)) => {
+                    println!("sync done: received {recv}, sent {sent}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        _ => err("sync subcommands: export|push|pull|apply|heads|serve|connect"),
     }
 }
 

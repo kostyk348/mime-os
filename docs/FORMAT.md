@@ -218,3 +218,32 @@ tail entry без поля writer — тоже "local" (serde default). Обра
 
 Транспорт — та же .eml-шина (spool-директория), что и EML-IPC: локальный и
 сетевой обмен неотличимы. SMTP-меш/QUIC — замена транспорта без смены формата.
+
+## TCP-транспорт (v0.2.1)
+
+`sync serve <container> --addr :9001` + `sync connect <container> --peer host:port`
+— двухсторонний delta-sync по TCP (чистый std::net, без зависимостей).
+
+Протокол — length-prefixed фреймы, блоки пересылаются verbatim:
+
+```
+[4-байт BE длина][payload]
+payload: b"MANIFEST " + JSON {"writer": last_seq, ...}
+         b"BLOCK "    + raw delta block
+         b"DONE"
+```
+
+Handshake: A→B MANIFEST(A); B→A MANIFEST(B) + недостающие A блоки + DONE;
+A применяет, A→B недостающие B блоки + DONE; B применяет. Обе стороны после
+синка имеют одинаковые цепочки (converged state), verify чистый.
+
+Инкрементальность: повторный connect передаёт только блоки с seq > last_seq
+пира (манифест). Конфликты по-прежнему LWW по (ts, writer) — сходятся на всех
+узлах.
+
+## Клеточный реверс (v0.3)
+
+Каждая функция objdump-листинга — отдельный .eml-контейнер:
+`X-EML-Type: Reverse/Binary-Function`, `X-Callees:` (call-граф),
+`References:` (вызывающие, вычисляются при сборке), `X-Type-ArgN:` (волновые
+типы), секция `listing` (assembly). Типы распространяются BFS по References.

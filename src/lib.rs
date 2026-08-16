@@ -11,6 +11,7 @@ pub mod pack;
 pub mod query;
 pub mod reader;
 pub mod runner;
+pub mod rev;
 pub mod sync;
 pub mod tagdb;
 pub mod verify;

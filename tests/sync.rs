@@ -138,3 +138,39 @@ fn export_since_seq() {
     assert_eq!(h[0].2, emlbox::format::hash_bytes(&all[1].1));
     assert_eq!(h.len(), 1);
 }
+
+#[test]
+fn tcp_roundtrip_converges() {
+    use std::net::TcpListener;
+    let (a, b, _) = setup("tcp");
+    kv::set_w(&a, "devA", "state", "x", json!(10)).unwrap();
+    kv::set_w(&a, "devA", "state", "x", json!(11)).unwrap();
+    kv::set_w(&b, "devB", "state", "y", json!(99)).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let b2 = b.clone();
+    let srv = std::thread::spawn(move || {
+        // one peer then stop
+        let (stream, _) = listener.accept().unwrap();
+        emlbox::sync::tcp_serve_once(&b2, stream).unwrap();
+    });
+    let (recv, sent) = sync::tcp_connect(&a, &addr.to_string()).unwrap();
+    srv.join().unwrap();
+    assert_eq!(recv, 1, "A получил devB#1");
+    assert_eq!(sent, 2, "A отдал devA#1,#2");
+
+    assert!(verify::verify(&a).unwrap().is_empty());
+    assert!(verify::verify(&b).unwrap().is_empty());
+    // обе стороны сошлись
+    let ha = sync::heads(&a).unwrap();
+    let hb = sync::heads(&b).unwrap();
+    assert_eq!(ha.len(), 2);
+    assert_eq!(hb.len(), 2);
+    let ba = emlbox::reader::EmlBox::open(&a).unwrap();
+    let bb = emlbox::reader::EmlBox::open(&b).unwrap();
+    assert_eq!(kv::get(&ba, "state", "x").unwrap(), Some(json!(11)));
+    assert_eq!(kv::get(&ba, "state", "y").unwrap(), Some(json!(99)));
+    assert_eq!(kv::get(&bb, "state", "x").unwrap(), Some(json!(11)));
+    assert_eq!(kv::get(&bb, "state", "y").unwrap(), Some(json!(99)));
+}
