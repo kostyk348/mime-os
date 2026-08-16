@@ -1,9 +1,14 @@
 //! KV client on top of the container: a KV table is a JSON section; writes are
-//! appended as delta blocks and replayed on read (base + patches in seq order).
+//! appended as delta blocks and replayed on read (base + patches).
+//!
+//! Multi-writer replay: внутри каждого писателя — строго по seq (причинность),
+//! между писателями — LWW по (ts, writer). Стабильная сортировка сохраняет
+//! порядок внутри писателя при равных (ts, writer) → детерминизм на всех
+//! устройствах.
 
-use crate::format::{parse_delta_block, slice, Delta};
+use crate::format::{parse_delta_block, slice, Delta, DEFAULT_WRITER};
 use crate::reader::EmlBox;
-use crate::writer::append_delta;
+use crate::writer::{append_delta, append_delta_w};
 use serde_json::Value;
 use std::path::Path;
 
@@ -12,13 +17,21 @@ pub fn table(b: &EmlBox, table: &str) -> Result<Value, String> {
         Some(s) => serde_json::from_slice(s).map_err(|e| format!("base table {table}: {e}"))?,
         None => Value::Object(serde_json::Map::new()),
     };
+    // (ts, writer, seq, delta): stable sort по (ts, writer) → внутри писателя
+    // при равных (ts, writer) сохраняется порядок вставки, а он по построению
+    // (append_block_w валидирует seq) совпадает с порядком по seq.
+    let mut items: Vec<(u64, String, u64, Delta)> = Vec::new();
     for e in b.tail_entries() {
         let block = slice(&b.mmap, e.off, e.len)?;
         if let Some(delta) = parse_delta_block(block)? {
             if delta.table == table {
-                apply(&mut out, &delta)?;
+                items.push((delta.ts, e.writer.clone(), e.seq, delta));
             }
         }
+    }
+    items.sort_by(|a, c| (a.0, &a.1).cmp(&(c.0, &c.1)));
+    for (_, _, _, delta) in items {
+        apply(&mut out, &delta)?;
     }
     Ok(out)
 }
@@ -49,6 +62,11 @@ fn apply(out: &mut Value, delta: &Delta) -> Result<(), String> {
 }
 
 pub fn set(path: &Path, table: &str, key: &str, value: Value) -> Result<(u64, String), String> {
+    set_w(path, DEFAULT_WRITER, table, key, value)
+}
+
+/// Write with an explicit writer id (для сети: каждое устройство — свой writer).
+pub fn set_w(path: &Path, writer: &str, table: &str, key: &str, value: Value) -> Result<(u64, String), String> {
     let delta = Delta {
         op: "set".into(),
         table: table.into(),
@@ -56,7 +74,7 @@ pub fn set(path: &Path, table: &str, key: &str, value: Value) -> Result<(u64, St
         value,
         ts: now(),
     };
-    append_delta(path, &delta)
+    append_delta_w(path, writer, &delta)
 }
 
 pub fn del(path: &Path, table: &str, key: &str) -> Result<(u64, String), String> {

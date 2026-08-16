@@ -17,7 +17,7 @@
 //!   emlbox demo <path> [--big]
 //!   emlbox bench <dir>
 
-use emlbox::{bench, demo, fs, ipc, kv, pack, reader, runner, tagdb, verify, writer};
+use emlbox::{bench, demo, fs, ipc, kv, pack, reader, runner, sync, tagdb, verify, writer};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -32,6 +32,7 @@ fn main() {
         Some("run") => cmd_run(&args[2..]),
         Some("fs") => cmd_fs(&args[2..]),
         Some("tagdb") => cmd_tagdb(&args[2..]),
+        Some("sync") => cmd_sync(&args[2..]),
         Some("mkdb") => cmd_mkdb(&args[2..]),
         Some("mkmem") => cmd_mkmem(&args[2..]),
         Some("pack") => cmd_pack(&args[2..]),
@@ -184,9 +185,15 @@ fn cmd_kv(a: &[String]) -> i32 {
                 Ok(v) => v,
                 Err(e) => return err(&format!("bad json: {e}")),
             };
-            match kv::set(&path, &table, &key, value) {
+            let writer = a
+                .iter()
+                .position(|x| x == "--writer")
+                .and_then(|i| a.get(i + 1))
+                .cloned()
+                .unwrap_or_else(|| "local".to_string());
+            match kv::set_w(&path, &writer, &table, &key, value) {
                 Ok((seq, h)) => {
-                    println!("delta seq={seq} hash={h:.12}");
+                    println!("delta [{writer}] seq={seq} hash={h:.12}");
                     0
                 }
                 Err(e) => err(&e),
@@ -492,6 +499,104 @@ fn cmd_tagdb(a: &[String]) -> i32 {
             }
         }
         _ => err("tagdb subcommands: insert|query|bench"),
+    }
+}
+
+fn cmd_sync(a: &[String]) -> i32 {
+    let sub = a.first().map(|s| s.as_str()).unwrap_or("");
+    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    match sub {
+        "export" => {
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
+            let since: u64 = flag("--since").and_then(|s| s.parse().ok()).unwrap_or(0);
+            match sync::export(&container, &writer, since) {
+                Ok(blocks) => {
+                    for (seq, b) in &blocks {
+                        println!(
+                            "writer {writer} seq={seq} ({} bytes, {})",
+                            b.len(),
+                            &emlbox::format::hash_bytes(b)[..12]
+                        );
+                    }
+                    println!("{} block(s), seq > {since}", blocks.len());
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "push" => {
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
+            let bus = flag("--bus").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/dev/shm/emlbox_bus"));
+            let to = flag("--to").unwrap_or_else(|| "*".to_string());
+            let since: u64 = flag("--since").and_then(|s| s.parse().ok()).unwrap_or(0);
+            match sync::push(&container, &writer, &bus, &to, since) {
+                Ok(n) => {
+                    println!("pushed {n} block(s) of writer {writer} to {}", bus.display());
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "pull" => {
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let bus = flag("--bus").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/dev/shm/emlbox_bus"));
+            match sync::pull(&container, &bus) {
+                Ok((applied, pending)) => {
+                    println!("applied {applied}, pending {pending}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "apply" => {
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let block_file = match path_arg(a, 2, "block file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let block = match std::fs::read(&block_file) {
+                Ok(b) => b,
+                Err(e) => return err(&format!("read {}: {e}", block_file.display())),
+            };
+            match sync::apply_block(&container, &block) {
+                Ok((w, seq)) => {
+                    println!("applied {w}#{seq}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "heads" => {
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match sync::heads(&container) {
+                Ok(h) => {
+                    for (w, seq, hash) in &h {
+                        println!("  {w}: seq={seq} hash={hash}");
+                    }
+                    println!("{} writer chain(s)", h.len());
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        _ => err("sync subcommands: export|push|pull|apply|heads"),
     }
 }
 

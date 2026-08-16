@@ -21,6 +21,9 @@ pub const INDEX_CT: &str = "application/x-emlbox-index+json";
 pub const TAIL_CT: &str = "application/x-emlbox-tail+json";
 pub const DELTA_CT: &str = "application/x-emlbox-delta+json";
 pub const ENC_RAW: &str = "raw";
+/// Writer id для локальных (не синхронизированных) дельт; он же — fallback
+/// для старых контейнеров, где поле writer отсутствует.
+pub const DEFAULT_WRITER: &str = "local";
 
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
@@ -54,10 +57,18 @@ pub struct HeadIndex {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TailEntry {
+    /// X-Delta-Seq — номер ВНУТРИ писателя (не глобальный)
     pub seq: u64,
+    /// X-Writer-ID — чей это блок; старые файлы читаются как "local"
+    #[serde(default = "default_writer")]
+    pub writer: String,
     pub off: u64,
     pub len: u64,
     pub hash: String,
+}
+
+fn default_writer() -> String {
+    DEFAULT_WRITER.to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

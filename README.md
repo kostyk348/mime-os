@@ -8,7 +8,7 @@
 
 ---
 
-## Что уже работает (прототип v0.1)
+## Что уже работает (прототип v0.2)
 
 | Слой | Команда | Что делает |
 |---|---|---|
@@ -20,8 +20,9 @@
 | **Runner** | `run` | исполняет `logic`-секцию контейнера на событиях шины |
 | **EML-FS** | `fs index/query/mkdir/dir/tag` | плоский диск + header-scan индекс + виртуальные директории |
 | **eml-tag** | `tagdb insert/query/bench` | плоская теговая БД: header-only scan, corruption-proof |
+| **Сеть (multi-writer sync)** | `sync export/push/pull/apply/heads` | delta-sync: per-writer chains, LWW merge, идемпотентная доставка, verify каждой цепочки |
 
-29 тестов зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
+39 тестов зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
 
 ---
 
@@ -88,6 +89,7 @@ emlbox get <path> <id> [--out file]
 emlbox kv get|set|del|dump <path> <table> [key] [json]
 emlbox ipc send|list <bus> [<to> <event> [json]]
 emlbox run <container> [--bus <dir>] [--once]
+emlbox sync export|push|pull|apply|heads <container> [--writer W] [--bus DIR] [--to ENTITY] [--since N]
 emlbox fs index|ls|query|mkdir|dir|tag <store> [...]
 emlbox tagdb insert|query|bench <db> [...]
 emlbox mkdb <path> [entity]          # X-EML-Type: Database/KV
@@ -237,18 +239,49 @@ OP: ==  !=  >=  <=  >  <
 
 ## Дорожная карта
 
-1. **Сетевой delta-sync** — синк дельт между устройствами поверх SMTP-меша/QUIC; главный дизайн-вопрос: merge дельт от двух писателей в одну hash-chain (writer-ID + порядок).
+1. ~~Сетевой delta-sync~~ ✅ **сделано (v0.2)**: per-writer chains, LWW merge, идемпотентная доставка. Транспорт — .eml-шина; SMTP-меш/QUIC — замена транспорта без смены формата.
 2. **Подписи** — DKIM/ed25519 поверх hash-chain (сейчас — только integrity).
 3. **Sandbox** для Runner — seccomp/nsjail (сейчас logic исполняется как есть).
 4. **Compaction** — слияние дельт в base; **reindex** после текстовых правок; **WAL** от tear-write.
 5. X-Query: OR/NOT, вложенность.
+6. **X-Encoding** секций: deflate + aes-256-gcm (сейчас — только raw).
+7. **CRDT-merge** (RGA для списков) вместо чистого LWW для ключей-коллекций.
+
+---
+
+## Синк между устройствами (сеть)
+
+Каждое устройство — независимый writer со своей цепочкой дельт; все цепочки
+сходятся на общем `X-Base-Hash`. Merge — LWW по времени, детерминизм на всех
+устройствах, `verify` проверяет каждую цепочку отдельно:
+
+```bash
+# устройство A
+emlbox kv set game.eml state x 47 --writer devA
+# устройство B
+emlbox kv set game.eml state y 205 --writer devB
+
+# B → шина → A
+emlbox sync push devB.eml --writer devB --bus /dev/shm/bus --to game
+emlbox sync pull devA.eml --bus /dev/shm/bus     # A получает чужие дельты
+
+# обратно: A → B
+emlbox sync push devA.eml --writer devA --bus /dev/shm/bus --to game
+emlbox sync pull devB.eml --bus /dev/shm/bus
+
+emlbox sync heads devA.eml    # все цепочки писателей
+emlbox verify devA.eml        # чисто
+```
+
+Повторная доставка блоков идемпотентна (dedup по writer#seq); блоки вне порядка
+остаются pending до прихода предшественника (pull крутится до стабилизации).
 
 ---
 
 ## Тесты
 
 ```bash
-cargo test    # 34 теста: инварианты формата, IPC+Runner, FS, tagdb, pack, X-Query
+cargo test    # 39 тестов: инварианты формата, IPC+Runner, FS, tagdb, pack, сетевая синхронизация, X-Query
 ```
 
 ## Лицензия

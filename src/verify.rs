@@ -33,20 +33,36 @@ pub fn verify(path: &Path) -> Result<Vec<String>, String> {
         issues.push(format!("base hash mismatch: got {got}, expected {}", b.base_hash));
     }
 
-    // 3. delta chain: each block hashes to its entry and links from base
-    let mut expect = b.base_hash.clone();
+    // 3. delta chains: per writer, each block hashes to its entry and chains
+    //    from base_hash (X-Prev-Hash == предыдущий блок ТОГО ЖЕ писателя).
+    let mut groups: std::collections::HashMap<String, Vec<&crate::format::TailEntry>> =
+        std::collections::HashMap::new();
     for e in b.tail_entries() {
-        let block = slice(&b.mmap, e.off, e.len)?;
-        let bh = hash_bytes(block);
-        if bh != e.hash {
-            issues.push(format!("delta {} hash mismatch", e.seq));
+        groups.entry(e.writer.clone()).or_default().push(e);
+    }
+    for (writer, mut entries) in groups {
+        entries.sort_by_key(|e| e.seq);
+        let mut expect = b.base_hash.clone();
+        for e in entries {
+            let block = slice(&b.mmap, e.off, e.len)?;
+            let bh = hash_bytes(block);
+            if bh != e.hash {
+                issues.push(format!("delta {writer}#{} hash mismatch", e.seq));
+            }
+            match block_header(block, "X-Prev-Hash") {
+                Some(prev) if prev == expect => {}
+                Some(prev) => issues.push(format!("delta {writer}#{} chain break: prev={prev}, expected {expect}", e.seq)),
+                None => issues.push(format!("delta {writer}#{} missing X-Prev-Hash", e.seq)),
+            }
+            match block_header(block, "X-Writer-ID") {
+                Some(w) if w == writer => {}
+                Some(w) => issues.push(format!("delta {writer}#{} header writer mismatch: {w}", e.seq)),
+                // старые контейнеры (до v0.2) не имели X-Writer-ID — это "local"
+                None if writer == "local" => {}
+                None => issues.push(format!("delta {writer}#{} missing X-Writer-ID", e.seq)),
+            }
+            expect = bh;
         }
-        match block_header(block, "X-Prev-Hash") {
-            Some(prev) if prev == expect => {}
-            Some(prev) => issues.push(format!("delta {} chain break: prev={prev}, expected {expect}", e.seq)),
-            None => issues.push(format!("delta {} missing X-Prev-Hash", e.seq)),
-        }
-        expect = bh;
     }
 
     // 4. trailer consistency

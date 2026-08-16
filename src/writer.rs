@@ -5,6 +5,12 @@
 //!
 //! append: writes a delta block *before* the tail index, then rewrites only
 //! [tail index .. EOF] — the base prefix never moves.
+//!
+//! Сетевой режим (multi-writer): каждый дельта-блок несёт X-Writer-ID,
+//! X-Delta-Seq (номер внутри писателя) и X-Prev-Hash (предыдущий блок ТОГО ЖЕ
+//! писателя, или base_hash для seq=1). Чужие блоки применяются дословно
+//! (append_block_w) — байты не меняются, hash-chain писателя сохраняется,
+//! все цепочки сходятся на общем X-Base-Hash.
 
 use crate::format::*;
 use crate::reader::EmlBox;
@@ -119,34 +125,94 @@ pub fn build_file_with_headers(
     Ok(())
 }
 
-/// Low-level append of a raw delta block (any EOL style — offsets are byte-exact).
-/// Returns (new_seq, block_hash).
-pub fn append_block(path: &Path, block: &[u8]) -> Result<(u64, String), String> {
+/// Next per-writer sequence and expected prev hash for `writer`.
+fn next_seq_prev(b: &EmlBox, writer: &str) -> (u64, String) {
+    let mut last: Option<&TailEntry> = None;
+    for e in &b.tail.entries {
+        if e.writer == writer {
+            last = Some(e);
+        }
+    }
+    match last {
+        Some(e) => (e.seq + 1, e.hash.clone()),
+        None => (1, b.base_hash.clone()),
+    }
+}
+
+/// Build a delta block for `writer` and append it. Returns (seq, block_hash).
+pub fn append_delta_w(path: &Path, writer: &str, delta: &Delta) -> Result<(u64, String), String> {
     let b = EmlBox::open(path)?;
     let entity = b.entity().ok_or("container has no X-Entity-ID")?;
-    let seq = b.tail.entries.len() as u64;
+    let (seq, prev) = next_seq_prev(&b, writer);
+    let body = serde_json::to_vec(delta).map_err(|e| e.to_string())?;
+    let mut block = format!(
+        "X-EMLBox-Delta: v1\r\nX-Entity-ID: {entity}\r\nX-Writer-ID: {writer}\r\n\
+         X-Delta-Seq: {seq}\r\nX-Prev-Hash: {prev}\r\nContent-Type: {DELTA_CT}\r\n\r\n"
+    )
+    .into_bytes();
+    block.extend_from_slice(&body);
+    append_block_w(path, writer, &block)
+}
+
+/// Backward-compatible local write (writer "local").
+pub fn append_delta(path: &Path, delta: &Delta) -> Result<(u64, String), String> {
+    append_delta_w(path, DEFAULT_WRITER, delta)
+}
+
+/// Append a block verbatim, validating its own X-Writer-ID / X-Delta-Seq /
+/// X-Prev-Hash against the container state. Foreign blocks keep their bytes
+/// untouched, so the writer's hash-chain stays intact across devices.
+///
+/// Out-of-order blocks (seq != next, or prev mismatch) are rejected — на
+/// синке они остаются pending до прихода предшественника.
+pub fn append_block_w(path: &Path, expected_writer: &str, block: &[u8]) -> Result<(u64, String), String> {
+    let b = EmlBox::open(path)?;
+    if block_header(block, "X-EMLBox-Delta").is_none() {
+        return Err("block: not an X-EMLBox-Delta block".into());
+    }
+    let writer = block_header(block, "X-Writer-ID").unwrap_or_else(|| DEFAULT_WRITER.to_string());
+    let seq: u64 = block_header(block, "X-Delta-Seq")
+        .ok_or("block: no X-Delta-Seq")?
+        .trim()
+        .parse()
+        .map_err(|_| "block: bad X-Delta-Seq")?;
+    let prev = block_header(block, "X-Prev-Hash").ok_or("block: no X-Prev-Hash")?;
+    let entity = b.entity().ok_or("container has no X-Entity-ID")?;
+
+    if writer != expected_writer {
+        return Err(format!("block writer {writer} != expected {expected_writer}"));
+    }
+    let (next_seq, expected_prev) = next_seq_prev(&b, &writer);
+    if seq != next_seq {
+        return Err(format!(
+            "out of order: writer {writer} has seq {seq}, expected {next_seq} (missing predecessor?)"
+        ));
+    }
+    if prev != expected_prev {
+        return Err(format!("prev hash mismatch for {writer}#{seq}: got {prev}, expected {expected_prev}"));
+    }
 
     let block_hash = hash_bytes(block);
     let mut entries = b.tail.entries.clone();
     // Deltas stay contiguous: the next block goes right after the previous one.
-    // The first delta overwrites the empty tail index written at creation (it
-    // sits directly after base, so [0, delta1.off) == base region exactly).
     let block_off = match b.tail.entries.last() {
         Some(last) => last.off + last.len,
         None => b.tail_index_off,
     };
     entries.push(TailEntry {
-        seq: seq + 1,
+        seq,
+        writer: writer.clone(),
         off: block_off,
         len: block.len() as u64,
         hash: block_hash.clone(),
     });
+    let total = entries.len() as u64; // X-Tail-Seq = число ВСЕХ блоков (total)
     let new_tail = TailIndex { v: 1, entries };
     let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
     let new_tail_off = block_off + block.len() as u64;
     let trailer = render_trailer(
         &entity,
-        seq + 1,
+        total,
         &b.base_hash,
         &block_hash,
         new_tail_off,
@@ -161,26 +227,12 @@ pub fn append_block(path: &Path, block: &[u8]) -> Result<(u64, String), String> 
     f.set_len(new_tail_off + new_tail_bytes.len() as u64 + TRAILER_SIZE as u64)
         .map_err(|e| e.to_string())?;
     f.sync_all().map_err(|e| e.to_string())?;
-    Ok((seq + 1, block_hash))
+    Ok((seq, block_hash))
 }
 
-/// Build a CRLF delta block and append it. Returns (seq, hash).
-pub fn append_delta(path: &Path, delta: &Delta) -> Result<(u64, String), String> {
-    let b = EmlBox::open(path)?;
-    let entity = b.entity().ok_or("container has no X-Entity-ID")?;
-    let seq = b.tail.entries.len() as u64;
-    let prev_hash = if seq == 0 {
-        b.base_hash.clone()
-    } else {
-        b.tail.entries[(seq - 1) as usize].hash.clone()
-    };
-    let body = serde_json::to_vec(delta).map_err(|e| e.to_string())?;
-    let mut block = format!(
-        "X-EMLBox-Delta: v1\r\nX-Entity-ID: {entity}\r\nX-Delta-Seq: {}\r\nX-Prev-Hash: {prev_hash}\r\n\
-         Content-Type: {DELTA_CT}\r\n\r\n",
-        seq + 1
-    )
-    .into_bytes();
-    block.extend_from_slice(&body);
-    append_block(path, &block)
+/// Low-level append of a raw delta block (any EOL style — offsets are byte-exact).
+/// Writer is taken from the block itself (default "local"). Returns (seq, block_hash).
+pub fn append_block(path: &Path, block: &[u8]) -> Result<(u64, String), String> {
+    let writer = block_header(block, "X-Writer-ID").unwrap_or_else(|| DEFAULT_WRITER.to_string());
+    append_block_w(path, &writer, block)
 }
