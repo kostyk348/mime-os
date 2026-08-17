@@ -23,10 +23,10 @@ pub fn new_post(path: &Path, title: &str, tags: &[String], body: &str) -> Result
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let extra = format!("X-Tag: {}\r\nX-Timestamp: {ts}\r\n", tags.join(", "));
-    let entity = format!("{name}@blog.local", name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default());
+    let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     build_file_with_headers(
         path,
-        &entity,
+        &name,
         title,
         &extra,
         vec![Part::raw("body", "text/markdown", "body.md", body.as_bytes().to_vec())],
@@ -119,8 +119,35 @@ pub fn build(posts_dir: &Path, out_dir: &Path) -> Result<usize, String> {
     Ok(posts.len())
 }
 
-fn epoch_date(ts: u64) -> String {
-    // гражданский календарь (алгоритм Говарда Хиннана)
+/// Экспорт постов в Hugo content: content/posts/<name>.md с YAML front matter
+/// (title, date, tags) — Hugo/PaperMod соберёт сам. Returns число постов.
+pub fn export_hugo(posts_dir: &Path, content_dir: &Path) -> Result<usize, String> {
+    let posts = read_posts(posts_dir)?;
+    let out = content_dir.join("posts");
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    for p in &posts {
+        let date = if p.ts > 0 {
+            let (y, m, d) = civil_date(p.ts);
+            format!("{y:04}-{m:02}-{d:02}")
+        } else {
+            "1970-01-01".to_string()
+        };
+        let tags = p.tags.iter().map(|t| format!("    - \"{}\"", t.replace('"', "\\\""))).collect::<Vec<_>>().join("\n");
+        let mut md = format!(
+            "---\ntitle: \"{}\"\ndate: {date}\ntags:\n{tags}\n---\n\n{}",
+            p.title.replace('"', "\\\""),
+            p.body
+        );
+        if !md.ends_with('\n') {
+            md.push('\n');
+        }
+        let f = out.join(format!("{}.md", p.name));
+        std::fs::write(&f, md).map_err(|e| e.to_string())?;
+    }
+    Ok(posts.len())
+}
+
+fn civil_date(ts: u64) -> (i64, i64, i64) {
     let days = (ts / 86400) as i64;
     let z = days + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
@@ -132,6 +159,11 @@ fn epoch_date(ts: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+fn epoch_date(ts: u64) -> String {
+    let (y, m, d) = civil_date(ts);
     let h = (ts % 86400) / 3600;
     let min = (ts % 3600) / 60;
     format!("{y:04}-{m:02}-{d:02} {h:02}:{min:02} UTC")

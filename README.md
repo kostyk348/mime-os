@@ -22,7 +22,9 @@
 | **eml-tag** | `tagdb insert/query/bench` | плоская теговая БД: header-only scan, corruption-proof |
 | **Сеть (multi-writer sync)** | `sync export/push/pull/apply/heads` | delta-sync: per-writer chains, LWW merge, идемпотентная доставка, verify каждой цепочки |
 | **Сеть (TCP transport)** | `sync serve/connect` | P2P delta-sync по TCP (чистый std::net): манифесты, инкрементальная передача блоков |
-| **Клеточный реверс** | `rev <binary> <dir>`, `rev type/wave/cluster/graph/types/hash/diff` | objdump → .eml-граф функций, волна типов с call-site dataflow, кластеры, диффинг версий (без Ghidra) |
+| **Клеточный реверс** | `rev <binary> <dir>`, `rev type/wave/cluster/graph/types/hash/diff/branch` | objdump → .eml-граф, волна типов (call-site dataflow), кластеры, diff, **ветки гипотез (In-Reply-To)** |
+| **Compaction** | `compact <c> [--out new]` | слияние дельт в base: секции консолидируются, цепочки сбрасываются к точке схождения |
+| **Подписи** | `EMLBOX_SEED` env | ed25519-подпись каждого дельта-блока, verify проверяет аутентичность |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |

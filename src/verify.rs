@@ -1,6 +1,6 @@
 //! verify: recompute index bounds, base hash, and the delta hash chain.
 
-use crate::format::{block_header, hash_bytes, hash_slice, slice};
+use crate::format::{block_header, find_blank, hash_bytes, hash_slice, slice};
 use crate::reader::EmlBox;
 use std::path::Path;
 
@@ -60,6 +60,15 @@ pub fn verify(path: &Path) -> Result<Vec<String>, String> {
                 // старые контейнеры (до v0.2) не имели X-Writer-ID — это "local"
                 None if writer == "local" => {}
                 None => issues.push(format!("delta {writer}#{} missing X-Writer-ID", e.seq)),
+            }
+            // ed25519 подпись, если блок подписан
+            let pk = block_header(block, "X-Writer-Key");
+            let sig = block_header(block, "X-Signature");
+            if let (Some(pk), Some(sig)) = (&pk, &sig) {
+                let body = &block[find_blank(block).map(|(e, s)| e + s).unwrap_or(block.len())..];
+                if !crate::sign::verify(pk, sig, body) {
+                    issues.push(format!("delta {writer}#{} bad signature", e.seq));
+                }
             }
             expect = bh;
         }

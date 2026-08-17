@@ -153,9 +153,17 @@ pub fn append_delta_w(path: &Path, writer: &str, delta: &Delta) -> Result<(u64, 
         Some(k) => (crate::encoding::encrypt_key(&k, &body)?, "X-Encoding: aes\r\n"),
         None => (body, ""),
     };
+    // ed25519 подпись тела (если EMLBOX_SEED задан)
+    let (key_hdr, sig_hdr) = match crate::sign::active_signer() {
+        Some((pk, sk)) => {
+            let sig = crate::sign::sign(&sk, &body);
+            (format!("X-Writer-Key: {pk}\r\n"), format!("X-Signature: {sig}\r\n"))
+        }
+        None => (String::new(), String::new()),
+    };
     let mut block = format!(
         "X-EMLBox-Delta: v1\r\nX-Entity-ID: {entity}\r\nX-Writer-ID: {writer}\r\n\
-         X-Delta-Seq: {seq}\r\nX-Prev-Hash: {prev}\r\n{enc_hdr}Content-Type: {DELTA_CT}\r\n\r\n"
+         X-Delta-Seq: {seq}\r\nX-Prev-Hash: {prev}\r\n{key_hdr}{sig_hdr}{enc_hdr}Content-Type: {DELTA_CT}\r\n\r\n"
     )
     .into_bytes();
     block.extend_from_slice(&body);

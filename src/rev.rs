@@ -777,3 +777,176 @@ mod norm_tests {
         assert_eq!(a, b);
     }
 }
+
+/// X-Call-Site заголовки клетки, перелинкованные на ветку.
+fn call_site_hdr(b: &EmlBox, seen: &HashSet<String>, branch_name: &str) -> String {
+    let mut out = String::new();
+    for (k, v) in &b.headers {
+        if k.eq_ignore_ascii_case("X-Call-Site") {
+            if let Some((callee, rest)) = v.split_once(':') {
+                let linked = if seen.contains(callee.trim()) {
+                    format!("{}@{}", callee.trim(), branch_name)
+                } else {
+                    callee.trim().to_string()
+                };
+                out.push_str(&format!("X-Call-Site: {linked}:{rest}\r\n"));
+            }
+        }
+    }
+    out
+}
+
+/// Ветка гипотез: клонировать подграф (func + вызывающие до depth) в клетки
+/// <name>@<branch>. Изоляция: волна типов в ветке не трогает исходные клетки.
+/// X-Callees внутри ветки перелинкованы (callee@branch); References
+/// пересчитываются вторым проходом. Откат — удалить клетки @branch.
+pub fn branch(dir: &Path, func: &str, branch_name: &str, depth: usize) -> Result<usize, String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back((func.to_string(), 0usize));
+    while let Some((n, d)) = queue.pop_front() {
+        if seen.insert(n.clone()) {
+            names.push(n.clone());
+        }
+        if d >= depth {
+            continue;
+        }
+        for c in callers(dir, &n)? {
+            if !seen.contains(&c) {
+                queue.push_back((c, d + 1));
+            }
+        }
+    }
+    // проход 1: клонировать клетки с перелинкованными X-Callees
+    for n in &names {
+        let b = EmlBox::open(&func_file(dir, n))?;
+        let listing = b.section("listing").ok_or("no listing")?;
+        let callees: Vec<String> = b
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+            .collect();
+        let linked: Vec<String> = callees
+            .iter()
+            .map(|c| if seen.contains(c) { format!("{c}@{branch_name}") } else { c.clone() })
+            .collect();
+        let root_hdr = if *n == *func { "X-Branch-Root: 1\r\n" } else { "" };
+        let cs = call_site_hdr(&b, &seen, branch_name);
+        let extra = format!(
+            "X-EML-Type: Reverse/Binary-Function\r\nX-Callees: {}\r\n{cs}In-Reply-To: {n}\r\nX-Branch: {branch_name}\r\n{root_hdr}",
+            linked.join(", ")
+        );
+        let entity = format!("{}@{branch_name}@{}", safe_name(n), BINARY);
+        build_file_with_headers(
+            &func_file(dir, &format!("{n}@{branch_name}")),
+            &entity,
+            &format!("{n}@{branch_name}"),
+            &extra,
+            vec![Part::raw("listing", "text/x-asm", "listing.txt", listing.to_vec())],
+        )
+        .map_err(|e| format!("branch {n}: {e}"))?;
+    }
+    // проход 2: References внутри ветки (кто @branch вызывает n@branch)
+    for n in &names {
+        let bn = format!("{n}@{branch_name}");
+        let mut refs: Vec<String> = Vec::new();
+        for m in &names {
+            let bm = EmlBox::open(&func_file(dir, &format!("{m}@{branch_name}")))?;
+            let callees: Vec<String> = bm
+                .headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+                .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+                .collect();
+            if callees.contains(&bn) {
+                refs.push(format!("{m}@{branch_name}"));
+            }
+        }
+        if refs.is_empty() {
+            continue;
+        }
+        // дописать References в клетку (пересоздать)
+        let b = EmlBox::open(&func_file(dir, &bn))?;
+        let listing = b.section("listing").ok_or("no listing")?;
+        let callees: Vec<String> = b
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+            .collect();
+        let root_hdr = if *n == *func { "X-Branch-Root: 1\r\n" } else { "" };
+        let cs = call_site_hdr(&b, &seen, branch_name);
+        let extra = format!(
+            "X-EML-Type: Reverse/Binary-Function\r\nX-Callees: {}\r\nReferences: {}\r\n{cs}In-Reply-To: {n}\r\nX-Branch: {branch_name}\r\n{root_hdr}",
+            callees.join(", "),
+            refs.join(", ")
+        );
+        build_file_with_headers(
+            &func_file(dir, &bn),
+            &format!("{}@{branch_name}@{}", safe_name(n), BINARY),
+            &bn,
+            &extra,
+            vec![Part::raw("listing", "text/x-asm", "listing.txt", listing.to_vec())],
+        )
+        .map_err(|e| format!("refs {bn}: {e}"))?;
+    }
+    Ok(names.len())
+}
+
+/// Список веток: X-Branch заголовки в каталоге.
+pub fn branches(dir: &Path) -> Result<Vec<(String, String, usize)>, String> {
+    // (branch, func, клеток в ветке)
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    let rd = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.extension().map(|x| x == "eml").unwrap_or(false) {
+            continue;
+        }
+        let b = EmlBox::open(&p)?;
+        if let Some(br) = b.header("X-Branch") {
+            let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            map.entry(br.to_string()).or_default().push(name);
+        }
+    }
+    let mut out: Vec<(String, String, usize)> = Vec::new();
+    for (br, names) in map {
+        let mut root = names.iter().min().cloned().unwrap_or_default();
+        let rd = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.extension().map(|x| x == "eml").unwrap_or(false) {
+                continue;
+            }
+            if let Ok(b) = EmlBox::open(&p) {
+                if b.header("X-Branch").map(|x| x == br.as_str()).unwrap_or(false)
+                    && b.header("X-Branch-Root").is_some()
+                {
+                    if let Some(nm) = p.file_stem().map(|x| x.to_string_lossy().to_string()) {
+                        root = nm;
+                    }
+                }
+            }
+        }
+        out.push((br, root, names.len()));
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Удалить ветку (откат гипотезы).
+pub fn branch_rm(dir: &Path, branch_name: &str) -> Result<usize, String> {
+    let mut removed = 0;
+    let rd = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for e in rd.flatten() {
+        let p = e.path();
+        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if name.ends_with(&format!("@{branch_name}.eml")) {
+            let _ = std::fs::remove_file(&p);
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}

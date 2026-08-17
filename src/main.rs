@@ -42,6 +42,7 @@ fn main() {
         Some("unpack") => cmd_unpack(&args[2..]),
         Some("append") => cmd_append(&args[2..]),
         Some("verify") => cmd_verify(&args[2..]),
+        Some("compact") => cmd_compact(&args[2..]),
         Some("demo") => cmd_demo(&args[2..]),
         Some("bench") => cmd_bench(&args[2..]),
         _ => {
@@ -628,6 +629,53 @@ fn cmd_rev(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
+        "branch" => {
+            // rev branch <dir> <func> <name> [--depth N]
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let func = a.get(2).cloned().unwrap_or_default();
+            let name = a.get(3).cloned().unwrap_or_default();
+            if name == "rm" {
+                let br = a.get(4).cloned().unwrap_or_default();
+                match rev::branch_rm(&dir, &br) {
+                    Ok(n) => {
+                        println!("ветка {br} удалена ({n} клеток)");
+                        0
+                    }
+                    Err(e) => err(&e),
+                }
+            } else if name == "list" {
+                match rev::branches(&dir) {
+                    Ok(list) => {
+                        for (br, root, n) in &list {
+                            println!("  {br}: корень {root}, {n} клеток");
+                        }
+                        if list.is_empty() {
+                            println!("веток нет");
+                        }
+                        0
+                    }
+                    Err(e) => err(&e),
+                }
+            } else {
+                let depth: usize = a
+                    .iter()
+                    .position(|x| x == "--depth")
+                    .and_then(|i| a.get(i + 1))
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(2);
+                match rev::branch(&dir, &func, &name, depth) {
+                    Ok(n) => {
+                        println!("ветка {name} от {func}: {n} клеток (depth {depth})");
+                        println!("волна: rev wave <dir> {func}@{name} arg0 Type ticks");
+                        0
+                    }
+                    Err(e) => err(&e),
+                }
+            }
+        }
         "diff" => {
             // rev diff <dirA> <dirB>
             let dir_a = match path_arg(a, 1, "dirA") {
@@ -1051,6 +1099,24 @@ fn cmd_site(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
+        "hugo" => {
+            // site hugo <posts-dir> <hugo-content-dir>
+            let posts = match path_arg(a, 1, "posts dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let content = match path_arg(a, 2, "hugo content dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match site::export_hugo(&posts, &content) {
+                Ok(n) => {
+                    println!("exported {n} постов -> {}/posts/", content.display());
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
         _ => {
             // site <posts-dir> <out-dir>
             let posts = match path_arg(a, 0, "posts dir") {
@@ -1069,5 +1135,26 @@ fn cmd_site(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
+    }
+}
+
+fn cmd_compact(a: &[String]) -> i32 {
+    // compact <container> [--out new.eml]
+    let src = match path_arg(a, 0, "container") {
+        Ok(p) => p,
+        Err(e) => return err(&e),
+    };
+    let out = a
+        .iter()
+        .position(|x| x == "--out")
+        .and_then(|i| a.get(i + 1))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("{}.compacted.eml", src.display())));
+    match emlbox::compact::compact(&src, &out) {
+        Ok((sections, deltas)) => {
+            println!("compact: {deltas} дельт слито в {sections} секций -> {}", out.display());
+            0
+        }
+        Err(e) => err(&e),
     }
 }

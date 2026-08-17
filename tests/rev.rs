@@ -80,3 +80,30 @@ fn cluster_finds_by_name_and_body() {
     assert!(hits.contains(&"main".to_string()));
     assert!(hits.contains(&"net_send".to_string()));
 }
+
+#[test]
+fn branch_isolates_hypothesis_and_rolls_back() {
+    let dir = cells("branch");
+    rev::build(&dir, LISTING).unwrap();
+    // ветка от player_move, depth 1: player_move@b + main@b (main вызывает player_move)
+    let n = rev::branch(&dir, "player_move", "b", 1).unwrap();
+    assert!(n >= 2);
+    assert!(dir.join("player_move@b.eml").exists());
+    assert!(dir.join("main@b.eml").exists());
+
+    // волна в ветке: net_send@b? нет — net_send не в подграфе (вызывается, не вызывает).
+    // player_move@b вызывается main@b (прямая передача) — волна от player_move@b arg0 идёт на main@b
+    let hit = rev::type_mark(&dir, "player_move@b", "arg0", "Packet", 2).unwrap();
+    assert!(hit.iter().any(|h| h.contains("main@b")), "{hit:?}");
+
+    // изоляция: исходные клетки не помечены
+    let tm = rev::type_map(&dir).unwrap();
+    for (name, _) in &tm {
+        assert!(name.contains('@'), "исходная клетка тронута: {name}");
+    }
+
+    // откат
+    let removed = rev::branch_rm(&dir, "b").unwrap();
+    assert_eq!(removed, n);
+    assert!(!dir.join("player_move@b.eml").exists());
+}
