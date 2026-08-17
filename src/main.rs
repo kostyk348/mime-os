@@ -44,6 +44,7 @@ fn main() {
         Some("verify") => cmd_verify(&args[2..]),
         Some("compact") => cmd_compact(&args[2..]),
         Some("repair") => cmd_repair(&args[2..]),
+        Some("doc") => cmd_doc(&args[2..]),
         Some("demo") => cmd_demo(&args[2..]),
         Some("bench") => cmd_bench(&args[2..]),
         _ => {
@@ -1212,5 +1213,77 @@ fn cmd_repair(a: &[String]) -> i32 {
             0
         }
         Err(e) => err(&e),
+    }
+}
+
+fn cmd_doc(a: &[String]) -> i32 {
+    let sub = a.first().map(|s| s.as_str()).unwrap_or("");
+    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    match sub {
+        "init" => {
+            // doc init <file> [entity]
+            let file = match path_arg(a, 1, "file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let entity = a.get(2).cloned().unwrap_or_else(|| "doc@system.local".to_string());
+            match writer::build_file(&file, &entity, "doc", vec![writer::Part::raw("doc", "application/json", "doc.json", br#"{"lines":[]}"#.to_vec())]) {
+                Ok(()) => {
+                    println!("doc created: {}", file.display());
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "add" => {
+            // doc add <file> <text> [--writer W] [--after id]
+            let file = match path_arg(a, 1, "file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let text = a.get(2).cloned().unwrap_or_default();
+            let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
+            let after = flag("--after");
+            match kv::add(&file, &writer, "doc", "lines", serde_json::Value::String(text), after) {
+                Ok((seq, h)) => {
+                    println!("doc line [{writer}] seq={seq} hash={h:.12}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "list" => {
+            // doc list <file> [-v]
+            let file = match path_arg(a, 1, "file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let verbose = a.iter().any(|x| x == "-v");
+            match reader::EmlBox::open(&file) {
+                Ok(b) => {
+                    let t = match kv::table(&b, "doc") {
+                        Ok(t) => t,
+                        Err(e) => return err(&e),
+                    };
+                    match t.get("lines") {
+                        Some(serde_json::Value::Array(arr)) => {
+                            for e in arr {
+                                if verbose {
+                                    let id = e.get("id").and_then(|i| i.as_str()).unwrap_or("?");
+                                    let v = e.get("v").and_then(|v| v.as_str()).unwrap_or("");
+                                    println!("[{id}] {v}");
+                                } else {
+                                    println!("{}", e.get("v").and_then(|v| v.as_str()).unwrap_or(""));
+                                }
+                            }
+                            0
+                        }
+                        _ => err("doc: no lines"),
+                    }
+                }
+                Err(e) => err(&e),
+            }
+        }
+        _ => err("doc subcommands: init|add|list"),
     }
 }
