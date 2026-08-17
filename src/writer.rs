@@ -248,7 +248,10 @@ pub fn append_block_w(path: &Path, expected_writer: &str, block: &[u8]) -> Resul
     f.write_all(&trailer).map_err(|e| e.to_string())?;
     f.set_len(new_tail_off + new_tail_bytes.len() as u64 + TRAILER_SIZE as u64)
         .map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
+    // EMLBOX_NO_FSYNC=1 — отключить fsync (быстрая запись, риск при крахе)
+    if std::env::var("EMLBOX_NO_FSYNC").is_err() {
+        f.sync_all().map_err(|e| e.to_string())?;
+    }
     Ok((seq, block_hash))
 }
 

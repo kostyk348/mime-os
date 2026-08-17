@@ -113,8 +113,12 @@ fn split_op(rest: &str) -> Result<(String, &str), String> {
 
 /// Evaluate a full query against a header set.
 pub fn eval_headers(headers: &[(String, String)], query: &str) -> Result<bool, String> {
-    let clauses = parse(query)?;
-    Ok(clauses.iter().all(|c| c.eval(headers)))
+    if query.contains(" OR ") || query.contains("NOT ") {
+        eval_query(headers, query)
+    } else {
+        let clauses = parse(query)?;
+        Ok(clauses.iter().all(|c| c.eval(headers)))
+    }
 }
 
 /// Evaluate a full query against a key/value map (convenience for tests).
@@ -176,5 +180,48 @@ mod tests {
         let h = vec![("Subject".into(), "Retro Arcade — one file".into())];
         assert!(eval_headers(&h, "Subject == \"arcade\"").unwrap());
         assert!(!eval_headers(&h, "Subject == \"physics\"").unwrap());
+    }
+}
+
+/// Полный запрос с OR и NOT на верхнем уровне:
+///   A AND B OR NOT C AND D
+///   OR-операнды разделяются " OR "; "NOT " отрицает AND-группу.
+pub fn eval_query(headers: &[(String, String)], query: &str) -> Result<bool, String> {
+    for part in query.split(" OR ") {
+        if eval_and(headers, part)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn eval_and(headers: &[(String, String)], part: &str) -> Result<bool, String> {
+    let (negate, rest) = match part.strip_prefix("NOT ") {
+        Some(r) => (true, r.trim()),
+        None => (false, part.trim()),
+    };
+    let clauses = parse(rest)?;
+    let res = clauses.iter().all(|c| c.eval(headers));
+    Ok(if negate { !res } else { res })
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+    fn h(tags: &[&str]) -> Vec<(String, String)> {
+        tags.iter().map(|t| ("X-Tag".to_string(), t.to_string())).collect()
+    }
+    #[test]
+    fn or_and_not() {
+        let rec1 = h(&["vita", "rust", "retro"]);
+        let rec2 = h(&["vita"]);
+        let rec3 = h(&["rust", "embedded"]);
+        assert!(eval_headers(&rec1, "X-Tag == \"vita\" AND X-Tag == \"rust\"").unwrap());
+        assert!(!eval_headers(&rec2, "X-Tag == \"vita\" AND X-Tag == \"rust\"").unwrap());
+        assert!(eval_headers(&rec3, "X-Tag == \"vita\" OR X-Tag == \"embedded\"").unwrap());
+        assert!(eval_headers(&rec1, "X-Tag == \"vita\" OR X-Tag == \"embedded\"").unwrap());
+        assert!(!eval_headers(&rec1, "NOT X-Tag == \"retro\"").unwrap());
+        assert!(eval_headers(&rec2, "NOT X-Tag == \"retro\"").unwrap());
+        assert!(eval_headers(&rec3, "NOT X-Tag == \"retro\"").unwrap());
     }
 }

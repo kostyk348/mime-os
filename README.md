@@ -27,7 +27,9 @@
 | **Подписи** | `EMLBOX_SEED` env | ed25519-подпись каждого дельта-блока, verify проверяет аутентичность |
 | **Compaction** | `compact <c>` | слияние дельт в base (точка схождения после синков) |
 | **Repair** | `repair <c>` | восстановление после tear-write: пересборка tail сканом блоков |
-| **RGA-списки** | `kv add/list` | конфликт-free списки (лог ходов, комментарии): вставка по id, реплики сходятся |
+| **RGA-списки** | `kv add/list` | конфликт-free списки: вставка по id, реплики сходятся |
+| **X-Query OR/NOT** | `tagdb query`, `fs query` | OR и NOT на верхнем уровне запроса |
+| **Mesh-демо** | `sync serve/connect` | 3+ узла сходятся по TCP (лог ходов, конфликтные вставки) |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |
