@@ -81,13 +81,19 @@ pub struct TailIndex {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Delta {
-    pub op: String, // "set" | "del"
+    pub op: String, // "set" | "del" | "add"
     pub table: String,
     pub key: String,
     #[serde(default)]
     pub value: serde_json::Value,
     #[serde(default)]
     pub ts: u64,
+    /// "add": id вставляемого элемента ("writer#seq" — уникален и монотонен)
+    #[serde(default)]
+    pub id: Option<String>,
+    /// "add": id элемента, ПОСЛЕ которого вставить (None = в конец)
+    #[serde(default)]
+    pub after: Option<String>,
 }
 
 // ---------------------------------------------------------------- hashing

@@ -9,7 +9,7 @@
 use crate::format::{parse_delta_block, slice, Delta, DEFAULT_WRITER};
 use crate::reader::EmlBox;
 use crate::writer::{append_delta, append_delta_w};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 
 pub fn table(b: &EmlBox, table: &str) -> Result<Value, String> {
@@ -60,6 +60,27 @@ fn apply(out: &mut Value, delta: &Delta) -> Result<(), String> {
             }
             _ => Err(format!("table is not an object (op=del {})", delta.table)),
         },
+        "add" => {
+            // RGA-вставка в список: элементы {"id","v"}, id = "writer#seq"
+            let arr = out
+                .as_object_mut()
+                .ok_or(format!("table is not an object (op=add {})", delta.table))?
+                .entry(delta.key.clone())
+                .or_insert_with(|| Value::Array(Vec::new()));
+            let Value::Array(arr) = arr else {
+                return Err(format!("key '{}' is not a list", delta.key));
+            };
+            let pos = match &delta.after {
+                Some(a) => arr
+                    .iter()
+                    .position(|e| e.get("id").and_then(|i| i.as_str()) == Some(a.as_str()))
+                    .map(|p| p + 1)
+                    .unwrap_or(arr.len()),
+                None => arr.len(),
+            };
+            arr.insert(pos, json!({ "id": delta.id.clone().unwrap_or_default(), "v": delta.value.clone() }));
+            Ok(())
+        }
         other => Err(format!("unknown delta op: {other}")),
     }
 }
@@ -76,6 +97,8 @@ pub fn set_w(path: &Path, writer: &str, table: &str, key: &str, value: Value) ->
         key: key.into(),
         value,
         ts: now(),
+        id: None,
+        after: None,
     };
     append_delta_w(path, writer, &delta)
 }
@@ -87,8 +110,44 @@ pub fn del(path: &Path, table: &str, key: &str) -> Result<(u64, String), String>
         key: key.into(),
         value: Value::Null,
         ts: now(),
+        id: None,
+        after: None,
     };
     append_delta(path, &delta)
+}
+
+/// RGA-добавление в список: value вставляется после элемента `after`
+/// (None = в конец). id элемента = "writer#seq" — уникален, порядок слияния
+/// детерминирован (LWW по ts,writer), реплики сходятся.
+pub fn add(
+    path: &Path,
+    writer: &str,
+    table: &str,
+    key: &str,
+    value: Value,
+    after: Option<String>,
+) -> Result<(u64, String), String> {
+    let seq = crate::writer::next_seq(path, writer)?;
+    let delta = Delta {
+        op: "add".into(),
+        table: table.into(),
+        key: key.into(),
+        value,
+        ts: now(),
+        id: Some(format!("{writer}#{seq}")),
+        after,
+    };
+    append_delta_w(path, writer, &delta)
+}
+
+/// Значения списка (без id-обёртки).
+pub fn list(b: &EmlBox, tbl: &str, key: &str) -> Result<Vec<Value>, String> {
+    let t = table(b, tbl)?;
+    match t.get(key) {
+        Some(Value::Array(arr)) => Ok(arr.iter().map(|e| e.get("v").cloned().unwrap_or(e.clone())).collect()),
+        Some(_) => Err(format!("key '{key}' is not a list")),
+        None => Ok(Vec::new()),
+    }
 }
 
 fn now() -> u64 {

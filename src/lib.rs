@@ -14,6 +14,7 @@ pub mod pack;
 pub mod query;
 pub mod reader;
 pub mod runner;
+pub mod repair;
 pub mod sign;
 pub mod site;
 pub mod rev;

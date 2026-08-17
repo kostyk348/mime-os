@@ -25,6 +25,9 @@
 | **Клеточный реверс** | `rev <binary> <dir>`, `rev type/wave/cluster/graph/types/hash/diff/branch` | objdump → .eml-граф, волна типов (call-site dataflow), кластеры, diff, **ветки гипотез (In-Reply-To)** |
 | **Compaction** | `compact <c> [--out new]` | слияние дельт в base: секции консолидируются, цепочки сбрасываются к точке схождения |
 | **Подписи** | `EMLBOX_SEED` env | ed25519-подпись каждого дельта-блока, verify проверяет аутентичность |
+| **Compaction** | `compact <c>` | слияние дельт в base (точка схождения после синков) |
+| **Repair** | `repair <c>` | восстановление после tear-write: пересборка tail сканом блоков |
+| **RGA-списки** | `kv add/list` | конфликт-free списки (лог ходов, комментарии): вставка по id, реплики сходятся |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |

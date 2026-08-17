@@ -141,6 +141,12 @@ fn next_seq_prev(b: &EmlBox, writer: &str) -> (u64, String) {
     }
 }
 
+/// Следующий per-writer seq (для id элементов RGA до записи).
+pub fn next_seq(path: &Path, writer: &str) -> Result<u64, String> {
+    let b = EmlBox::open(path)?;
+    Ok(next_seq_prev(&b, writer).0)
+}
+
 /// Build a delta block for `writer` and append it. Returns (seq, block_hash).
 /// Если задан ключ (EMLBOX_KEY/EMLBOX_PASS) — тело блока шифруется aes-256-gcm
 /// (X-Encoding: aes), база целиком недоступна без ключа.

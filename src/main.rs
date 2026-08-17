@@ -17,7 +17,7 @@
 //!   emlbox demo <path> [--big]
 //!   emlbox bench <dir>
 
-use emlbox::{bench, demo, fs, ipc, kv, mail, pack, reader, rev, runner, site, sync, tagdb, verify, writer};
+use emlbox::{bench, demo, fs, ipc, kv, mail, pack, reader, repair, rev, runner, site, sync, tagdb, verify, writer};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -43,6 +43,7 @@ fn main() {
         Some("append") => cmd_append(&args[2..]),
         Some("verify") => cmd_verify(&args[2..]),
         Some("compact") => cmd_compact(&args[2..]),
+        Some("repair") => cmd_repair(&args[2..]),
         Some("demo") => cmd_demo(&args[2..]),
         Some("bench") => cmd_bench(&args[2..]),
         _ => {
@@ -217,6 +218,47 @@ fn cmd_kv(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
+        "add" => {
+            let key = a.get(3).cloned().unwrap_or_default();
+            let val = a.get(4).cloned().unwrap_or_default();
+            let value: Value = match serde_json::from_str(&val) {
+                Ok(v) => v,
+                Err(e) => return err(&format!("bad json: {e}")),
+            };
+            let writer = a
+                .iter()
+                .position(|x| x == "--writer")
+                .and_then(|i| a.get(i + 1))
+                .cloned()
+                .unwrap_or_else(|| "local".to_string());
+            let after = a
+                .iter()
+                .position(|x| x == "--after")
+                .and_then(|i| a.get(i + 1))
+                .cloned();
+            match kv::add(&path, &writer, &table, &key, value, after) {
+                Ok((seq, h)) => {
+                    println!("add [{writer}] seq={seq} hash={h:.12}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "list" => match reader::EmlBox::open(&path) {
+            Ok(b) => {
+                let key = a.get(3).cloned().unwrap_or_default();
+                match kv::list(&b, &table, &key) {
+                Ok(items) => {
+                    for it in &items {
+                        println!("{}", it);
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+                }
+            },
+            Err(e) => err(&e),
+        },
         "del" => {
             let key = a.get(3).cloned().unwrap_or_default();
             match kv::del(&path, &table, &key) {
@@ -237,7 +279,7 @@ fn cmd_kv(a: &[String]) -> i32 {
             },
             Err(e) => err(&e),
         },
-        _ => err("kv subcommands: get|set|del|dump"),
+        _ => err("kv subcommands: get|set|add|list|del|dump"),
     }
 }
 
@@ -1153,6 +1195,20 @@ fn cmd_compact(a: &[String]) -> i32 {
     match emlbox::compact::compact(&src, &out) {
         Ok((sections, deltas)) => {
             println!("compact: {deltas} дельт слито в {sections} секций -> {}", out.display());
+            0
+        }
+        Err(e) => err(&e),
+    }
+}
+
+fn cmd_repair(a: &[String]) -> i32 {
+    let path = match path_arg(a, 0, "container") {
+        Ok(p) => p,
+        Err(e) => return err(&e),
+    };
+    match repair::repair(&path) {
+        Ok((blocks, removed)) => {
+            println!("repair: восстановлено {blocks} блоков, отброшено {removed} байт -> {}", path.display());
             0
         }
         Err(e) => err(&e),
