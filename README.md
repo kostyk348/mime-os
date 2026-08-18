@@ -29,8 +29,8 @@
 | **Repair** | `repair <c>` | восстановление после tear-write: пересборка tail сканом блоков |
 | **RGA-списки** | `kv add/list` | конфликт-free списки: вставка по id, реплики сходятся |
 | **X-Query OR/NOT** | `tagdb query`, `fs query` | OR и NOT на верхнем уровне запроса |
-| **Mesh-демо** | `sync serve/connect` | 3+ узла сходятся по TCP (лог ходов, конфликтные вставки) |
-| **Совместные документы** | `doc init/add/set/del/list/edit` | CRDT-документ: add/set/del, правка в $EDITOR, конфликты сходятся |
+| **Mesh-демо** | `sync serve/connect/converge` | 3+ узла сходятся по TCP; `converge --peers` тянет от всех пиров |
+| **Совместные документы** | `doc init/add/set/del/list/edit/log/revert` | CRDT-документ: правка в $EDITOR, история изменений, откат |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |

@@ -115,3 +115,42 @@ fn find_sub(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     }
     haystack.windows(needle.len()).position(|w| w == needle)
 }
+
+/// Усечь контейнер до первых `keep` дельта-блоков (откат истории).
+/// Блоки отбрасываются, tail пересобирается. Returns (оставлено, удалено).
+pub fn truncate_blocks(path: &Path, keep: usize) -> Result<(usize, usize), String> {
+    let (recovered, _) = repair(path)?;
+    let total = recovered;
+    if keep >= total {
+        return Ok((total, 0));
+    }
+    // после repair файл валиден: открываем и пересчитываем
+    let b = EmlBox::open(path)?;
+    let n = b.tail_entries().len();
+    if keep >= n {
+        return Ok((n, 0));
+    }
+    // пересобираем tail из первых keep записей
+    let entries: Vec<TailEntry> = b.tail_entries()[..keep].to_vec();
+    let last = entries.last().cloned().unwrap();
+    let new_tail_off = last.off + last.len;
+    let new_tail = TailIndex { v: 1, entries: entries.clone() };
+    let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
+    let entity = b.entity().unwrap_or_default();
+    let trailer = render_trailer(
+        &entity,
+        new_tail.entries.len() as u64,
+        &b.base_hash,
+        &last.hash,
+        new_tail_off,
+        new_tail_bytes.len() as u64,
+    );
+    let new_len = new_tail_off + new_tail_bytes.len() as u64 + TRAILER_SIZE as u64;
+    let mut f = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(new_tail_off)).map_err(|e| e.to_string())?;
+    f.write_all(&new_tail_bytes).map_err(|e| e.to_string())?;
+    f.write_all(&trailer).map_err(|e| e.to_string())?;
+    f.set_len(new_len).map_err(|e| e.to_string())?;
+    f.sync_all().map_err(|e| e.to_string())?;
+    Ok((keep, n - keep))
+}

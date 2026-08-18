@@ -921,6 +921,32 @@ fn cmd_sync(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
+        "converge" => {
+            // sync converge <container> --peers host:port,...
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let peers = flag("--peers").unwrap_or_default();
+            let mut total_recv = 0usize;
+            let mut total_sent = 0usize;
+            for peer in peers.split(',') {
+                let peer = peer.trim();
+                if peer.is_empty() {
+                    continue;
+                }
+                match sync::tcp_connect(&container, peer) {
+                    Ok((r, s)) => {
+                        total_recv += r;
+                        total_sent += s;
+                        println!("  {peer}: received {r}, sent {s}");
+                    }
+                    Err(e) => println!("  {peer}: {e}"),
+                }
+            }
+            println!("converge: received {total_recv}, sent {total_sent}");
+            0
+        }
         "heads" => {
             let container = match path_arg(a, 1, "container") {
                 Ok(p) => p,
@@ -962,7 +988,7 @@ fn cmd_sync(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
-        _ => err("sync subcommands: export|push|pull|apply|heads|serve|connect"),
+        _ => err("sync subcommands: export|push|pull|apply|heads|serve|connect|converge"),
     }
 }
 
@@ -1321,8 +1347,65 @@ fn cmd_doc(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
-        _ => err("doc subcommands: init|add|edit|set|del|list"),
+        "log" => {
+            // doc log <file> — история изменений
+            let file = match path_arg(a, 1, "file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match reader::EmlBox::open(&file) {
+                Ok(b) => {
+                    for e in b.tail_entries() {
+                        let block = match emlbox::format::slice(&b.mmap, e.off, e.len) {
+                            Ok(x) => x,
+                            Err(_) => continue,
+                        };
+                        if let Ok(Some(d)) = emlbox::format::parse_delta_block(block) {
+                            let v = if d.value.is_string() { d.value.as_str().unwrap_or("").to_string() } else { d.value.to_string() };
+                            let v = if v.len() > 40 { format!("{}...", &v[..40]) } else { v };
+                            println!("{}.{}  {}  {}.{} = {}", e.writer, e.seq, ts_fmt(d.ts), d.table, d.key, v);
+                        }
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "revert" => {
+            // doc revert <file> <N> — откат на N последних дельт
+            let file = match path_arg(a, 1, "file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let n: usize = match a.get(2).and_then(|s| s.parse().ok()) {
+                Some(n) => n,
+                None => return err("revert: need N (сколько последних дельт откатить)"),
+            };
+            let total = match reader::EmlBox::open(&file) {
+                Ok(b) => b.tail_entries().len(),
+                Err(e) => return err(&e),
+            };
+            match emlbox::repair::truncate_blocks(&file, total.saturating_sub(n)) {
+                Ok((left, removed)) => {
+                    println!("revert: -{removed} дельт, осталось {left}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        _ => err("doc subcommands: init|add|edit|set|del|list|log|revert"),
     }
+}
+
+fn ts_fmt(ts: u64) -> String {
+    if ts == 0 {
+        return "?".into();
+    }
+    // UTC
+    let days = ts / 86400;
+    let h = (ts % 86400) / 3600;
+    let m = (ts % 3600) / 60;
+    format!("d{days} {h:02}:{m:02}")
 }
 
 fn cmd_doc_edit(a: &[String]) -> i32 {

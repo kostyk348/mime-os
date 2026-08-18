@@ -47,3 +47,25 @@ fn repair_recovers_after_tear_write() {
     assert!(n >= 4, "n={n}");
     let _ = last;
 }
+
+#[test]
+fn truncate_rolls_back_deltas() {
+    let dir = std::env::temp_dir().join(format!("emlbox_trunc_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("db.eml");
+    build_file(&p, "db@system.local", "db", vec![Part::raw("state", "application/json", "state.json", br#"{"n":0}"#.to_vec())]).unwrap();
+    kv::set(&p, "state", "n", json!(1)).unwrap();
+    kv::set(&p, "state", "n", json!(2)).unwrap();
+    kv::set(&p, "state", "n", json!(3)).unwrap();
+    let b = emlbox::reader::EmlBox::open(&p).unwrap();
+    assert_eq!(kv::get(&b, "state", "n").unwrap(), Some(json!(3)));
+    drop(b);
+
+    // откат на 2 последних дельты
+    let (left, removed) = emlbox::repair::truncate_blocks(&p, 1).unwrap();
+    assert_eq!((left, removed), (1, 2));
+    let b = emlbox::reader::EmlBox::open(&p).unwrap();
+    assert_eq!(kv::get(&b, "state", "n").unwrap(), Some(json!(1)));
+    assert!(verify::verify(&p).unwrap().is_empty());
+}
