@@ -30,7 +30,7 @@
 | **RGA-списки** | `kv add/list` | конфликт-free списки: вставка по id, реплики сходятся |
 | **X-Query OR/NOT** | `tagdb query`, `fs query` | OR и NOT на верхнем уровне запроса |
 | **Mesh-демо** | `sync serve/connect` | 3+ узла сходятся по TCP (лог ходов, конфликтные вставки) |
-| **Совместные документы** | `doc init/add/list` | CRDT-документ на .eml: строки = RGA-список, синк без потерь |
+| **Совместные документы** | `doc init/add/set/del/list` | CRDT-документ: add/set/del строк, конфликты сходятся |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |

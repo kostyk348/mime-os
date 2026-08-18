@@ -1284,6 +1284,39 @@ fn cmd_doc(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
-        _ => err("doc subcommands: init|add|list"),
+        "set" => {
+            // doc set <file> <text> --id <id> [--writer W]
+            let file = match path_arg(a, 1, "file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let text = a.get(2).cloned().unwrap_or_default();
+            let id = flag("--id").unwrap_or_default();
+            let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
+            match kv::list_set(&file, &writer, "doc", "lines", &id, serde_json::Value::String(text)) {
+                Ok((seq, h)) => {
+                    println!("doc line [{writer}] set {id} seq={seq} hash={h:.12}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "del" => {
+            // doc del <file> --id <id> [--writer W]
+            let file = match path_arg(a, 1, "file") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let id = flag("--id").unwrap_or_default();
+            let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
+            match kv::list_del(&file, &writer, "doc", "lines", &id) {
+                Ok((seq, h)) => {
+                    println!("doc line [{writer}] del {id} seq={seq} hash={h:.12}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        _ => err("doc subcommands: init|add|set|del|list"),
     }
 }

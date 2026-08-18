@@ -56,3 +56,32 @@ fn rga_insert_after_specific_element() {
     let vals: Vec<i64> = l.iter().map(|v| v["n"].as_i64().unwrap()).collect();
     assert_eq!(vals, vec![1, 2, 3], "{vals:?}");
 }
+
+#[test]
+fn rga_edit_operations_converge() {
+    let (a, b) = setup("edit");
+    let (_, _) = kv::add(&a, "devA", "log", "moves", json!({"n": 1}), None).unwrap();
+    let (_, _) = kv::add(&a, "devA", "log", "moves", json!({"n": 2}), None).unwrap();
+    // A правит n=1 → 10; B правит ту же → 20 (set-set, LWW)
+    kv::list_set(&a, "devA", "log", "moves", "devA#1", json!({"n": 10})).unwrap();
+    kv::list_set(&b, "devB", "log", "moves", "devA#1", json!({"n": 20})).unwrap();
+    // B удаляет devA#2
+    kv::list_del(&b, "devB", "log", "moves", "devA#2").unwrap();
+
+    let bus = a.parent().unwrap().join("bus");
+    sync::push(&b, "devB", &bus, "*", 0).unwrap();
+    sync::pull(&a, &bus).unwrap();
+    sync::push(&a, "devA", &bus, "*", 0).unwrap();
+    sync::pull(&b, &bus).unwrap();
+
+    let ba = emlbox::reader::EmlBox::open(&a).unwrap();
+    let bb = emlbox::reader::EmlBox::open(&b).unwrap();
+    let la = kv::list(&ba, "log", "moves").unwrap();
+    let lb = kv::list(&bb, "log", "moves").unwrap();
+    assert_eq!(la, lb, "сходятся");
+    // 1 элемент остался: {n:20} (set LWW: devB позже), второй удалён
+    assert_eq!(la.len(), 1, "{la:?}");
+    assert_eq!(la[0]["n"], json!(20));
+    assert!(verify::verify(&a).unwrap().is_empty());
+    assert!(verify::verify(&b).unwrap().is_empty());
+}

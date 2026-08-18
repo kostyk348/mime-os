@@ -81,6 +81,31 @@ fn apply(out: &mut Value, delta: &Delta) -> Result<(), String> {
             arr.insert(pos, json!({ "id": delta.id.clone().unwrap_or_default(), "v": delta.value.clone() }));
             Ok(())
         }
+        "list-set" => {
+            // замена значения элемента по id (LWW по ts,writer)
+            let arr = out
+                .as_object_mut()
+                .ok_or(format!("table is not an object (op=list-set {})", delta.table))?
+                .get_mut(&delta.key)
+                .and_then(|v| v.as_array_mut())
+                .ok_or(format!("key '{}' is not a list", delta.key))?;
+            if let Some(e) = arr.iter_mut().find(|e| e.get("id").and_then(|i| i.as_str()) == delta.id.as_deref()) {
+                e["v"] = delta.value.clone();
+            }
+            Ok(())
+        }
+        "list-del" => {
+            // удаление элемента по id
+            let arr = out
+                .as_object_mut()
+                .ok_or(format!("table is not an object (op=list-del {})", delta.table))?
+                .get_mut(&delta.key)
+                .and_then(|v| v.as_array_mut())
+                .ok_or(format!("key '{}' is not a list", delta.key))?;
+            let id = delta.id.clone().unwrap_or_default();
+            arr.retain(|e| e.get("id").and_then(|i| i.as_str()) != Some(id.as_str()));
+            Ok(())
+        }
         other => Err(format!("unknown delta op: {other}")),
     }
 }
@@ -136,6 +161,34 @@ pub fn add(
         ts: now(),
         id: Some(format!("{writer}#{seq}")),
         after,
+    };
+    append_delta_w(path, writer, &delta)
+}
+
+/// Замена значения элемента списка по id (LWW).
+pub fn list_set(path: &Path, writer: &str, table: &str, key: &str, id: &str, value: Value) -> Result<(u64, String), String> {
+    let delta = Delta {
+        op: "list-set".into(),
+        table: table.into(),
+        key: key.into(),
+        value,
+        ts: now(),
+        id: Some(id.to_string()),
+        after: None,
+    };
+    append_delta_w(path, writer, &delta)
+}
+
+/// Удаление элемента списка по id.
+pub fn list_del(path: &Path, writer: &str, table: &str, key: &str, id: &str) -> Result<(u64, String), String> {
+    let delta = Delta {
+        op: "list-del".into(),
+        table: table.into(),
+        key: key.into(),
+        value: Value::Null,
+        ts: now(),
+        id: Some(id.to_string()),
+        after: None,
     };
     append_delta_w(path, writer, &delta)
 }
