@@ -30,7 +30,7 @@
 | **RGA-списки** | `kv add/list` | конфликт-free списки: вставка по id, реплики сходятся |
 | **X-Query OR/NOT** | `tagdb query`, `fs query` | OR и NOT на верхнем уровне запроса |
 | **Mesh-демо** | `sync serve/connect` | 3+ узла сходятся по TCP (лог ходов, конфликтные вставки) |
-| **Совместные документы** | `doc init/add/set/del/list` | CRDT-документ: add/set/del строк, конфликты сходятся |
+| **Совместные документы** | `doc init/add/set/del/list/edit` | CRDT-документ: add/set/del, правка в $EDITOR, конфликты сходятся |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |
@@ -111,7 +111,7 @@ emlbox mail pack|apply|receive       # SMTP-мост: письма с дельт
 emlbox site new <post.eml> --title T --tags a,b --src body.md
 emlbox site <posts> <out>            # сборка статического сайта
 emlbox-gui <file.eml>                # GUI (cargo build --features gui)
-emlbox doc init/add/list <file>      # совместный документ (CRDT-строки)
+emlbox doc init/add/set/del/edit/list <file>  # совместный документ; edit = правка в $EDITOR с авто-дельтами
 emlbox fs index|ls|query|mkdir|dir|tag <store> [...]
 emlbox tagdb insert|query|bench <db> [...]
 emlbox mkdb <path> [entity]          # X-EML-Type: Database/KV

@@ -4,6 +4,7 @@
 pub mod bench;
 pub mod compact;
 pub mod demo;
+pub mod diff;
 pub mod encoding;
 pub mod format;
 pub mod fs;

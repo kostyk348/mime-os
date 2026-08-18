@@ -1284,6 +1284,10 @@ fn cmd_doc(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
+        "edit" => {
+            // doc edit <file> [--writer W] — правка в $EDITOR, дельты автоматически
+            return cmd_doc_edit(a);
+        }
         "set" => {
             // doc set <file> <text> --id <id> [--writer W]
             let file = match path_arg(a, 1, "file") {
@@ -1317,6 +1321,98 @@ fn cmd_doc(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
-        _ => err("doc subcommands: init|add|set|del|list"),
+        _ => err("doc subcommands: init|add|edit|set|del|list"),
     }
+}
+
+fn cmd_doc_edit(a: &[String]) -> i32 {
+    // doc edit <file> [--writer W]
+    let file = match path_arg(a, 1, "file") {
+        Ok(p) => p,
+        Err(e) => return err(&e),
+    };
+    let writer = a
+        .iter()
+        .position(|x| x == "--writer")
+        .and_then(|i| a.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "local".to_string());
+    let b = match reader::EmlBox::open(&file) {
+        Ok(b) => b,
+        Err(e) => return err(&e),
+    };
+    let t = match kv::table(&b, "doc") {
+        Ok(t) => t,
+        Err(e) => return err(&e),
+    };
+    let arr = t.get("lines").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let old: Vec<(String, String)> = arr
+        .iter()
+        .map(|e| {
+            (
+                e.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string(),
+                e.get("v").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    // временный файл + редактор
+    let tmp = std::env::temp_dir().join(format!("emlbox_doc_{}_{}.txt", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
+    let mut content = old.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n");
+    if !content.is_empty() {
+        content.push('\n');
+    }
+    if std::fs::write(&tmp, &content).is_err() {
+        return err("can't write temp doc");
+    }
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} {}", tmp.display()))
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        return err("editor failed");
+    }
+    let edited = match std::fs::read_to_string(&tmp) {
+        Ok(s) => s,
+        Err(e) => return err(&format!("read edited: {e}")),
+    };
+    let new_lines: Vec<String> = edited.lines().map(|l| l.to_string()).collect();
+    let ops = emlbox::diff::diff_lines(&old, &new_lines);
+    let mut applied = 0usize;
+    let mut prev_add_id: Option<String> = None; // id последней добавленной строки
+    for op in &ops {
+        let r = match op {
+            emlbox::diff::LineOp::Add { after, text } => {
+                // "__next__" = после предыдущей добавленной строки
+                let eff_after = if after.as_deref() == Some("__next__") {
+                    prev_add_id.clone()
+                } else {
+                    after.clone()
+                };
+                let r = kv::add(&file, &writer, "doc", "lines", serde_json::Value::String(text.clone()), eff_after);
+                if let Ok((seq, _)) = &r {
+                    prev_add_id = Some(format!("{writer}#{seq}"));
+                }
+                r
+            }
+            emlbox::diff::LineOp::Set { id, text } => {
+                prev_add_id = None;
+                kv::list_set(&file, &writer, "doc", "lines", id, serde_json::Value::String(text.clone()))
+            }
+            emlbox::diff::LineOp::Del { id } => {
+                prev_add_id = None;
+                kv::list_del(&file, &writer, "doc", "lines", id)
+            }
+        };
+        match r {
+            Ok(_) => applied += 1,
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return err(&format!("apply {op:?}: {e}"));
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
+    println!("doc edit [{writer}]: {applied} дельт");
+    0
 }
