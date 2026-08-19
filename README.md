@@ -29,7 +29,7 @@
 | **Repair** | `repair <c>` | восстановление после tear-write: пересборка tail сканом блоков |
 | **RGA-списки** | `kv add/list` | конфликт-free списки: вставка по id, реплики сходятся |
 | **X-Query OR/NOT** | `tagdb query`, `fs query` | OR и NOT на верхнем уровне запроса |
-| **Mesh-демо** | `sync serve/connect/converge` | 3+ узла сходятся по TCP; `converge --peers` тянет от всех пиров |
+| **Mesh-демо** | `sync serve/connect/converge/daemon` | живой mesh: `daemon --peers` синкается автоматически по таймеру |
 | **Совместные документы** | `doc init/add/set/del/list/edit/log/revert` | CRDT-документ: правка в $EDITOR, история изменений, откат |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
@@ -104,6 +104,7 @@ emlbox kv get|set|del|dump <path> <table> [key] [json]
 emlbox ipc send|list <bus> [<to> <event> [json]]
 emlbox run <container> [--bus <dir>] [--once]
 emlbox sync export|push|pull|apply|heads <container> [--writer W] [--bus DIR] [--to ENTITY] [--since N]
+emlbox sync daemon <container> --addr :9001 --peers a,b [--interval 10]
 emlbox sync serve <container> --addr :9001 | sync connect <container> --peer host:port
 emlbox rev <binary> <dir>            # objdump -> .eml-граф функций
 emlbox rev type|wave|cluster|graph|types|hash|diff <dir> [...]

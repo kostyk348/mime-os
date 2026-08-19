@@ -947,6 +947,41 @@ fn cmd_sync(a: &[String]) -> i32 {
             println!("converge: received {total_recv}, sent {total_sent}");
             0
         }
+        "daemon" => {
+            // sync daemon <container> --addr :9001 [--peers a,b] [--interval 10]
+            let container = match path_arg(a, 1, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let addr = flag("--addr").unwrap_or_else(|| "127.0.0.1:9001".to_string());
+            let peers = flag("--peers").unwrap_or_default();
+            let interval: u64 = flag("--interval").and_then(|s| s.parse().ok()).unwrap_or(10);
+            // сервер в потоке
+            let c = container.clone();
+            let a = addr.clone();
+            let _srv = std::thread::spawn(move || {
+                let _ = sync::tcp_serve(&c, &a);
+            });
+            println!("daemon: serve {addr}, peers [{peers}], interval {interval}s");
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(interval));
+                for peer in peers.split(',') {
+                    let peer = peer.trim();
+                    if peer.is_empty() {
+                        continue;
+                    }
+                    match sync::tcp_connect(&container, peer) {
+                        Ok((r, s)) => {
+                            if r > 0 || s > 0 {
+                                println!("  [{:?}] {peer}: received {r}, sent {s}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+                            }
+                        }
+                        Err(e) => println!("  {peer}: {e}"),
+                    }
+                }
+            }
+            0
+        }
         "heads" => {
             let container = match path_arg(a, 1, "container") {
                 Ok(p) => p,
@@ -988,7 +1023,7 @@ fn cmd_sync(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
-        _ => err("sync subcommands: export|push|pull|apply|heads|serve|connect|converge"),
+        _ => err("sync subcommands: export|push|pull|apply|heads|serve|connect|converge|daemon"),
     }
 }
 
