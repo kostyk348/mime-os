@@ -169,3 +169,23 @@ fn decompile_lifts_asm_to_pseudocode() {
     assert!(joined.contains("net_send(...);"), "{joined}");
     assert!(joined.contains("return;"), "{joined}");
 }
+
+#[test]
+fn structured_decompiler_finds_if() {
+    let body = vec![
+        "111b:\t55              \tpush   rbp".to_string(),
+        "111c:\t8b 45 f8        \tmov    eax,DWORD PTR [rbp-0x8]".to_string(),
+        "111f:\t85 c0           \ttest   eax,eax".to_string(),
+        "1121:\t7e 0a           \tjle    112d".to_string(),
+        "1123:\tbf 03 00 00 00  \tmov    edi,0x3".to_string(),
+        "1128:\te8 xx           \tcall   114a <render_sprite>".to_string(),
+        "112d:\tc9              \tleave".to_string(),
+        "112e:\tc3              \tret".to_string(),
+    ];
+    let out = rev::decompile_structured(&body);
+    let if_pos = out.find("if (jle) {");
+    assert!(if_pos.is_some(), "if найден: {out}");
+    let call_pos = out.find("render_sprite");
+    assert!(call_pos.is_some() && call_pos.unwrap() > if_pos.unwrap(), "render_sprite внутри if: {out}");
+    assert!(out.contains("return;"));
+}

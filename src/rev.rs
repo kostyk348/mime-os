@@ -1191,3 +1191,211 @@ fn reg_of(s: &str) -> String {
 fn target(args: &str) -> String {
     args.split_whitespace().last().unwrap_or("?").to_string()
 }
+
+// ---------------------------------------------------------------- CFG-структурирование
+
+#[derive(Debug, Clone)]
+struct Insn {
+    addr: u64,
+    mnem: String,
+    args: String,
+}
+
+#[derive(Debug, Clone)]
+struct Block {
+    label: Option<String>,
+    insns: Vec<String>,
+    term: String, // "jcc <cond> <target>" | "jmp <target>" | "ret" | "fall"
+}
+
+/// Структурный декомпилятор v0.2: CFG -> if/else/while (с отступами).
+pub fn decompile_structured(body: &[String]) -> String {
+    let insns = parse_insns(body);
+    if insns.is_empty() {
+        return String::new();
+    }
+    let func_start = insns[0].addr;
+    let mut targets: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    for i in &insns {
+        if let Some(t) = target_addr(&i.args, func_start) {
+            targets.insert(t);
+        }
+    }
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut cur: Option<Block> = None;
+    for i in &insns {
+        let is_label = targets.contains(&i.addr);
+        if is_label {
+            if let Some(b) = cur.take() {
+                blocks.push(b);
+            }
+            cur = Some(Block { label: Some(format!("L{:x}", i.addr)), insns: Vec::new(), term: "fall".into() });
+        }
+        if cur.is_none() {
+            cur = Some(Block { label: None, insns: Vec::new(), term: "fall".into() });
+        }
+        let b = cur.as_mut().unwrap();
+        match i.mnem.as_str() {
+            "jmp" => {
+                b.term = format!("jmp {}", target_label(&i.args, func_start));
+                if let Some(fin) = cur.take() {
+                    blocks.push(fin);
+                }
+                continue;
+            }
+            "ret" => {
+                b.term = "ret".to_string();
+                if let Some(fin) = cur.take() {
+                    blocks.push(fin);
+                }
+                continue;
+            }
+            "je" | "jz" | "jne" | "jnz" | "jg" | "jge" | "jl" | "jle" | "ja" | "jb" | "jae" | "jbe" | "js" | "jns" => {
+                b.term = format!("jcc {op} {tgt}", op = i.mnem, tgt = target_label(&i.args, func_start));
+                if let Some(fin) = cur.take() {
+                    blocks.push(fin);
+                }
+                continue;
+            }
+            "call" => {
+                let name = i.args.trim_start_matches("0x").split_whitespace().last().unwrap_or("?").trim_matches(['<', '>']);
+                b.insns.push(format!("{name}(...);"));
+            }
+            other => {
+                let stmt = translate(&format!("{other} {}", i.args));
+                if !stmt.is_empty() {
+                    b.insns.push(stmt);
+                }
+            }
+        }
+    }
+    if let Some(b) = cur.take() {
+        blocks.push(b);
+    }
+    // структурирование
+    let mut out = String::new();
+    let mut i = 0usize;
+    let mut emitted: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    while i < blocks.len() {
+        if emitted.contains(&i) {
+            i += 1;
+            continue;
+        }
+        let b = &blocks[i];
+        let _indent = "";
+        if b.term.starts_with("jcc ") {
+            // jcc -> if
+            let parts: Vec<&str> = b.term.splitn(3, ' ').collect();
+            let cond = &parts[1];
+            let target = parts[2];
+            // найти блок с target-меткой
+            let t_idx = blocks.iter().position(|x| x.label.as_deref() == Some(target));
+            let then_idx = i + 1;
+            // else: блок после then, если он jmp к join
+            // код ДО if — снаружи
+            for insn in &b.insns {
+                out.push_str(&format!("{insn}\n"));
+            }
+            // then-блок
+            let mut body = String::new();
+            if then_idx < blocks.len() && !emitted.contains(&then_idx) {
+                body.push_str(&block_body(&blocks[then_idx], 4));
+                emitted.insert(then_idx);
+            }
+            if let Some(ti) = t_idx {
+                let else_body = block_body(&blocks[ti], 4);
+                if ti != then_idx && !emitted.contains(&ti) && !else_body.trim().is_empty() {
+                    // else-ветка
+                    body.push_str(&format!("}} else {{\n"));
+                    body.push_str(&else_body);
+                    emitted.insert(ti);
+                    body.push_str("}\n");
+                } else {
+                    body.push_str("}\n");
+                }
+            } else {
+                body.push_str("}\n");
+            }
+            out.push_str(&format!("if ({cond}) {{\n{body}"));
+            emitted.insert(i);
+        } else if b.term.starts_with("jmp ") {
+            let target = b.term[4..].to_string();
+            // обратное ребро -> while? упрощённо: goto
+            for insn in &b.insns {
+                out.push_str(&format!("{insn}\n"));
+            }
+            out.push_str(&format!("goto {target};\n"));
+            emitted.insert(i);
+        } else {
+            for insn in &b.insns {
+                out.push_str(&format!("{insn}\n"));
+            }
+            if b.term == "ret" {
+                out.push_str("return;\n");
+            }
+            emitted.insert(i);
+        }
+        i += 1;
+    }
+    out
+}
+
+fn block_body(b: &Block, indent: usize) -> String {
+    let mut s = String::new();
+    for insn in &b.insns {
+        s.push_str(&format!("{}\n", " ".repeat(indent)));
+        s.push_str(insn);
+        s.push('\n');
+    }
+    s
+}
+
+fn parse_insns(body: &[String]) -> Vec<Insn> {
+    let mut out = Vec::new();
+    for line in body {
+        let l = line.trim();
+        if l.is_empty() {
+            continue;
+        }
+        let (addr, rest) = match l.split_once(':') {
+            Some((a, r)) => (a.trim(), r.trim()),
+            None => continue,
+        };
+        let Ok(addr) = u64::from_str_radix(addr, 16) else { continue };
+        // отбросить hex-байты: мнемоника после двойного таба
+        let m = match rest.rsplit('\t').next() {
+            Some(m) => m.trim(),
+            None => continue,
+        };
+        if m.is_empty() {
+            continue;
+        }
+        let mut it = m.split_whitespace();
+        let mnem = it.next().unwrap_or("").to_lowercase();
+        let args = it.collect::<Vec<_>>().join(" ");
+        out.push(Insn { addr, mnem, args });
+    }
+    out
+}
+
+fn target_addr(args: &str, func_start: u64) -> Option<u64> {
+    let t = args.split_whitespace().last()?;
+    let t = t.trim_matches(['<', '>']);
+    if let Some((_, off)) = t.split_once('+') {
+        return u64::from_str_radix(off.trim_start_matches("0x"), 16).ok().map(|o| func_start + o);
+    }
+    if let Some(off) = t.strip_prefix("0x") {
+        return u64::from_str_radix(off, 16).ok();
+    }
+    // голый hex-адрес (objdump без метки)
+    if !t.is_empty() && t.chars().all(|c| c.is_ascii_hexdigit()) {
+        return u64::from_str_radix(t, 16).ok();
+    }
+    None
+}
+
+fn target_label(args: &str, func_start: u64) -> String {
+    target_addr(args, func_start)
+        .map(|a| format!("L{:x}", a))
+        .unwrap_or_else(|| "L?".to_string())
+}

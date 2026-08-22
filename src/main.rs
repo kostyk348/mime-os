@@ -775,7 +775,8 @@ fn cmd_rev(a: &[String]) -> i32 {
             }
         }
         "decomp" => {
-            // rev decomp <dir> <func> — лифтер псевдо-C
+            // rev decomp <dir> <func> [--struct] — лифтер псевдо-C (CFG-структурированный)
+            let structured = a.iter().any(|x| x == "--struct");
             let dir = match path_arg(a, 1, "dir") {
                 Ok(p) => p,
                 Err(e) => return err(&e),
@@ -783,9 +784,13 @@ fn cmd_rev(a: &[String]) -> i32 {
             let func = a.get(2).cloned().unwrap_or_default();
             match rev::body_of(&dir, &func) {
                 Some(body) => {
-                    for line in rev::decompile(&body) {
-                        if !line.is_empty() {
-                            println!("{line}");
+                    if structured {
+                        print!("{}", rev::decompile_structured(&body));
+                    } else {
+                        for line in rev::decompile(&body) {
+                            if !line.is_empty() {
+                                println!("{line}");
+                            }
                         }
                     }
                     0
