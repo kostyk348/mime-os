@@ -128,3 +128,27 @@ fn recon_classifies_regions() {
     assert!(classes.iter().any(|c| *c == "plain" || *c == "code"), "{classes:?}");
     assert!(classes.last().map(|c| *c == "compressed" || *c == "code").unwrap_or(false), "{classes:?}");
 }
+
+#[test]
+fn vftables_found_in_cpp_binary() {
+    // требует g++ (пропускается без него)
+    let gpp = std::process::Command::new("g++").arg("--version").output();
+    if gpp.map(|o| !o.status.success()).unwrap_or(true) {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("emlbox_vft_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let src = dir.join("s.cpp");
+    let bin = dir.join("s");
+    std::fs::write(&src, r#"
+struct A { virtual ~A(){} virtual int f() const { return 1; } virtual int g() const { return 2; } };
+struct B : A { int f() const override { return 10; } };
+int main(){ A a; B b; return a.f() + b.g(); }
+"#).unwrap();
+    if !std::process::Command::new("g++").args(["-O0", "-g"]).arg(&src).arg("-o").arg(&bin).status().map(|s| s.success()).unwrap_or(false) {
+        return;
+    }
+    let cands = rev::vftables(&bin).unwrap();
+    let max_run = cands.iter().map(|(_, n, _)| *n).max().unwrap_or(0);
+    assert!(max_run >= 4, "vtable с ~5 указателями: {cands:?}");
+}

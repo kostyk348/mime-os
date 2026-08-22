@@ -720,6 +720,27 @@ fn cmd_rev(a: &[String]) -> i32 {
                 }
             }
         }
+        "vftables" => {
+            // rev vftables <binary>
+            let binary = match path_arg(a, 1, "binary") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match rev::vftables(&binary) {
+                Ok(cands) => {
+                    println!("vftable-кандидаты (указатели в .text, >= 3 подряд):");
+                    for (off, n, ptrs) in cands.iter().take(10) {
+                        let first: Vec<String> = ptrs.iter().take(4).map(|p| format!("{p:#x}")).collect();
+                        println!("  vaddr {off:#x}: {n} указателей  [{}]", first.join(", "));
+                    }
+                    if cands.is_empty() {
+                        println!("  не найдено");
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
         "recon" => {
             // rev recon <binary>
             let binary = match path_arg(a, 1, "binary") {

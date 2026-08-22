@@ -1004,3 +1004,69 @@ pub fn recon(binary: &Path) -> Result<(Vec<(u64, u64, String)>, Vec<(u64, u64, f
     }
     Ok((strings, regions))
 }
+
+/// vftable-детект: искать в данных последовательности 8-байтных указателей,
+/// указывающих в .text (массивы виртуальных функций). Возвращает кандидаты:
+/// (file_off, count, первые адреса).
+pub fn vftables(binary: &Path) -> Result<Vec<(u64, usize, Vec<u64>)>, String> {
+    let out = std::process::Command::new("objdump")
+        .args(["-h"])
+        .arg(binary)
+        .output()
+        .map_err(|e| format!("objdump: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // секции: name addr(hex) off(hex) size(hex) — 5-я и 6-я колонки в objdump -h
+    let mut text_ranges: Vec<(u64, u64, u64)> = Vec::new(); // (vaddr, file_off, size)
+    let mut data_secs: Vec<(u64, u64, u64)> = Vec::new(); // (vaddr, file_off, size)
+    for line in text.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 7 {
+            continue;
+        }
+        let name = f[1];
+        let vaddr = u64::from_str_radix(f[3], 16).ok();
+        let off = u64::from_str_radix(f[5], 16).ok();
+        let size = u64::from_str_radix(f[4], 16).ok();
+        let (Some(vaddr), Some(off), Some(size)) = (vaddr, off, size) else { continue };
+        if name.starts_with(".text") || name.starts_with(".init") || name.starts_with(".fini") {
+            text_ranges.push((vaddr, off, size));
+        } else if name.starts_with(".rodata") || name.starts_with(".data.rel.ro") || name.starts_with(".data") {
+            if name != ".data" || size > 0 {
+                data_secs.push((vaddr, off, size));
+            }
+        }
+    }
+    let data = std::fs::read(binary).map_err(|e| e.to_string())?;
+    let mut cands = Vec::new();
+    for (vaddr, off, size) in data_secs {
+        let start = off as usize;
+        let end = (start + size as usize).min(data.len());
+        let mut run: Vec<u64> = Vec::new();
+        let mut run_off = 0u64;
+        let mut i = start;
+        while i + 8 <= end {
+            let ptr = u64::from_le_bytes(data[i..i + 8].try_into().unwrap());
+            let in_text = text_ranges.iter().any(|(tv, to, ts)| {
+                let file = ptr.checked_sub(*tv).map(|d| *to + d);
+                file.map(|f| f + 1 <= *to + *ts).unwrap_or(false)
+            });
+            if in_text {
+                if run.is_empty() {
+                    run_off = (i - start) as u64;
+                }
+                run.push(ptr);
+            } else if run.len() >= 3 {
+                cands.push((vaddr + run_off, run.len(), run.clone()));
+                run = Vec::new();
+            } else {
+                run = Vec::new();
+            }
+            i += 8;
+        }
+        if run.len() >= 3 {
+            cands.push((vaddr + run_off, run.len(), run.clone()));
+        }
+    }
+    cands.sort_by_key(|(_, n, _)| std::cmp::Reverse(*n));
+    Ok(cands)
+}
