@@ -107,3 +107,24 @@ fn branch_isolates_hypothesis_and_rolls_back() {
     assert_eq!(removed, n);
     assert!(!dir.join("player_move@b.eml").exists());
 }
+
+#[test]
+fn recon_classifies_regions() {
+    let dir = std::env::temp_dir().join(format!("emlbox_recon_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let p = dir.join("blob.bin");
+    // 8192 байт plain 'A' + 8192 случайных (высокая энтропия)
+    let mut data = vec![b'A'; 8192];
+    for _ in 0..8192 {
+        data.push((std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() % 256) as u8);
+    }
+    std::fs::write(&p, &data).unwrap();
+    let (strings, regions) = rev::recon(&p).unwrap();
+    // строки: куски 'A' длиной >= 6
+    assert!(strings.len() >= 1);
+    // регионы: первые ~plain, потом высокоэнтропийные
+    assert!(regions.len() >= 2);
+    let classes: Vec<&str> = regions.iter().map(|(_, _, _, c)| *c).collect();
+    assert!(classes.iter().any(|c| *c == "plain" || *c == "code"), "{classes:?}");
+    assert!(classes.last().map(|c| *c == "compressed" || *c == "code").unwrap_or(false), "{classes:?}");
+}

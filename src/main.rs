@@ -720,6 +720,28 @@ fn cmd_rev(a: &[String]) -> i32 {
                 }
             }
         }
+        "recon" => {
+            // rev recon <binary>
+            let binary = match path_arg(a, 1, "binary") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match rev::recon(&binary) {
+                Ok((strings, regions)) => {
+                    println!("строк (>=6): {}; регионы энтропии: {}", strings.len(), regions.len());
+                    for (s, e, h, class) in &regions {
+                        println!("  [{class:10}] {s:#x}..{e:#x} entropy={h:.2}");
+                    }
+                    println!("\nпримеры строк:");
+                    for (off, len, text) in strings.iter().take(12) {
+                        let t: String = text.chars().take(60).collect();
+                        println!("  {off:#x} ({len}b) {t}");
+                    }
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
         "diff" => {
             // rev diff <dirA> <dirB>
             let dir_a = match path_arg(a, 1, "dirA") {

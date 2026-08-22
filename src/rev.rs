@@ -950,3 +950,57 @@ pub fn branch_rm(dir: &Path, branch_name: &str) -> Result<usize, String> {
     }
     Ok(removed)
 }
+
+/// Разведка бинарника до дизассемблирования: строки и энтропийные регионы.
+/// Returns (строки: Vec<(off, len, text)>, регионы: Vec<(start, end, entropy, class)>).
+pub fn recon(binary: &Path) -> Result<(Vec<(u64, u64, String)>, Vec<(u64, u64, f64, &'static str)>), String> {
+    let data = std::fs::read(binary).map_err(|e| e.to_string())?;
+    // строки (printable >= 6)
+    let mut strings = Vec::new();
+    let mut start = 0usize;
+    for i in 0..data.len() {
+        let c = data[i];
+        let printable = (0x20..=0x7e).contains(&c);
+        if !printable {
+            if i - start >= 6 {
+                strings.push((start as u64, (i - start) as u64, String::from_utf8_lossy(&data[start..i]).to_string()));
+            }
+            start = i + 1;
+        }
+    }
+    if data.len() - start >= 6 {
+        strings.push((start as u64, (data.len() - start) as u64, String::from_utf8_lossy(&data[start..]).to_string()));
+    }
+    // энтропия по блокам 4096
+    const BLOCK: usize = 4096;
+    let mut regions: Vec<(u64, u64, f64, &'static str)> = Vec::new();
+    let mut i = 0usize;
+    while i < data.len() {
+        let end = (i + BLOCK).min(data.len());
+        let block = &data[i..end];
+        let mut hist = [0u64; 256];
+        for b in block {
+            hist[*b as usize] += 1;
+        }
+        let n = block.len() as f64;
+        let mut h = 0.0;
+        for c in hist {
+            if c > 0 {
+                let p = c as f64 / n;
+                h -= p * p.log2();
+            }
+        }
+        let class = if h < 4.5 { "plain" } else if h < 7.5 { "code" } else { "compressed" };
+        if let Some(last) = regions.last_mut() {
+            if last.3 == class {
+                last.1 = end as u64;
+                last.2 = (last.2 + h) / 2.0;
+                i = end;
+                continue;
+            }
+        }
+        regions.push((i as u64, end as u64, h, class));
+        i = end;
+    }
+    Ok((strings, regions))
+}
