@@ -784,6 +784,23 @@ fn cmd_rev(a: &[String]) -> i32 {
             let func = a.get(2).cloned().unwrap_or_default();
             match rev::body_of(&dir, &func) {
                 Some(body) => {
+                    // сигнатура из волны типов (X-Type-argN)
+                    let cell = dir.join(format!("{func}.eml"));
+                    if let Ok(b) = reader::EmlBox::open(&cell) {
+                        let mut types: Vec<(usize, String)> = Vec::new();
+                        for (k, v) in &b.headers {
+                            if let Some(n) = k.strip_prefix("X-Type-arg") {
+                                if let Ok(n) = n.parse::<usize>() {
+                                    types.push((n, v.clone()));
+                                }
+                            }
+                        }
+                        if !types.is_empty() {
+                            types.sort();
+                            let args: Vec<String> = types.iter().map(|(n, t)| format!("{t} arg{n}")).collect();
+                            println!("// {}({})", func.split('@').next().unwrap_or(&func), args.join(", "));
+                        }
+                    }
                     if structured {
                         print!("{}", rev::decompile_structured(&body));
                     } else {

@@ -183,7 +183,7 @@ fn structured_decompiler_finds_if() {
         "112e:\tc3              \tret".to_string(),
     ];
     let out = rev::decompile_structured(&body);
-    let if_pos = out.find("if (jle) {");
+    let if_pos = out.find("if (eax <= 0) {");
     assert!(if_pos.is_some(), "if найден: {out}");
     let call_pos = out.find("render_sprite");
     assert!(call_pos.is_some() && call_pos.unwrap() > if_pos.unwrap(), "render_sprite внутри if: {out}");

@@ -1206,6 +1206,7 @@ struct Block {
     label: Option<String>,
     insns: Vec<String>,
     term: String, // "jcc <cond> <target>" | "jmp <target>" | "ret" | "fall"
+    last_test: Option<(String, String, String)>, // (mnem cmp|test, a, b)
 }
 
 /// Структурный декомпилятор v0.2: CFG -> if/else/while (с отступами).
@@ -1229,15 +1230,15 @@ pub fn decompile_structured(body: &[String]) -> String {
             if let Some(b) = cur.take() {
                 blocks.push(b);
             }
-            cur = Some(Block { label: Some(format!("L{:x}", i.addr)), insns: Vec::new(), term: "fall".into() });
+            cur = Some(Block { label: Some(format!("L{:x}", i.addr)), insns: Vec::new(), term: "fall".into(), last_test: None });
         }
         if cur.is_none() {
-            cur = Some(Block { label: None, insns: Vec::new(), term: "fall".into() });
+            cur = Some(Block { label: None, insns: Vec::new(), term: "fall".into(), last_test: None });
         }
         let b = cur.as_mut().unwrap();
         match i.mnem.as_str() {
             "jmp" => {
-                b.term = format!("jmp {}", target_label(&i.args, func_start));
+                b.term = format!("jmp|{}", target_label(&i.args, func_start));
                 if let Some(fin) = cur.take() {
                     blocks.push(fin);
                 }
@@ -1251,11 +1252,19 @@ pub fn decompile_structured(body: &[String]) -> String {
                 continue;
             }
             "je" | "jz" | "jne" | "jnz" | "jg" | "jge" | "jl" | "jle" | "ja" | "jb" | "jae" | "jbe" | "js" | "jns" => {
-                b.term = format!("jcc {op} {tgt}", op = i.mnem, tgt = target_label(&i.args, func_start));
+                let cond = build_cond(&i.mnem, &b.last_test);
+                b.term = format!("jcc|{cond}|{tgt}", tgt = target_label(&i.args, func_start));
                 if let Some(fin) = cur.take() {
                     blocks.push(fin);
                 }
                 continue;
+            }
+            "cmp" | "test" => {
+                let parts: Vec<&str> = i.args.split(',').map(|x| x.trim()).collect();
+                let a = parts.first().cloned().unwrap_or("").to_string();
+                let bb = parts.get(1).cloned().unwrap_or("").to_string();
+                b.last_test = Some((i.mnem.clone(), a, bb));
+                b.insns.push(format!("/* {} {} */", i.mnem, i.args));
             }
             "call" => {
                 let name = i.args.trim_start_matches("0x").split_whitespace().last().unwrap_or("?").trim_matches(['<', '>']);
@@ -1283,9 +1292,9 @@ pub fn decompile_structured(body: &[String]) -> String {
         }
         let b = &blocks[i];
         let _indent = "";
-        if b.term.starts_with("jcc ") {
+        if b.term.starts_with("jcc|") {
             // jcc -> if
-            let parts: Vec<&str> = b.term.splitn(3, ' ').collect();
+            let parts: Vec<&str> = b.term.splitn(3, '|').collect();
             let cond = &parts[1];
             let target = parts[2];
             // найти блок с target-меткой
@@ -1318,7 +1327,7 @@ pub fn decompile_structured(body: &[String]) -> String {
             }
             out.push_str(&format!("if ({cond}) {{\n{body}"));
             emitted.insert(i);
-        } else if b.term.starts_with("jmp ") {
+        } else if b.term.starts_with("jmp|") {
             let target = b.term[4..].to_string();
             // обратное ребро -> while? упрощённо: goto
             for insn in &b.insns {
@@ -1398,4 +1407,44 @@ fn target_label(args: &str, func_start: u64) -> String {
     target_addr(args, func_start)
         .map(|a| format!("L{:x}", a))
         .unwrap_or_else(|| "L?".to_string())
+}
+
+/// Условие из jcc + последнего cmp/test: "test eax,eax; jg" -> "eax > 0".
+fn build_cond(jcc: &str, test: &Option<(String, String, String)>) -> String {
+    let op = match jcc {
+        "jg" | "jnle" => ">",
+        "jge" | "jnl" => ">=",
+        "jl" | "jnge" => "<",
+        "jle" | "jng" => "<=",
+        "je" | "jz" => "==",
+        "jne" | "jnz" => "!=",
+        "ja" => "u>",
+        "jb" => "u<",
+        "jae" => "u>=",
+        "jbe" => "u<=",
+        "js" => "s<0",
+        "jns" => "s>=0",
+        _ => jcc,
+    };
+    match test {
+        Some((m, a, b)) => {
+            if m == "test" {
+                if a == b {
+                    match jcc {
+                        "jg" => format!("{a} > 0"),
+                        "jle" => format!("{a} <= 0"),
+                        "js" => format!("{a} < 0"),
+                        "jns" => format!("{a} >= 0"),
+                        _ => format!("({a} & {b}) {op} 0"),
+                    }
+                } else {
+                    format!("({a} & {b}) {op} 0")
+                }
+            } else {
+                // cmp a, b
+                format!("{a} {op} {b}")
+            }
+        }
+        None => op.to_string(),
+    }
 }
