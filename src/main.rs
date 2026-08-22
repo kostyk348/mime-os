@@ -45,6 +45,7 @@ fn main() {
         Some("compact") => cmd_compact(&args[2..]),
         Some("repair") => cmd_repair(&args[2..]),
         Some("doc") => cmd_doc(&args[2..]),
+        Some("setup-home") => cmd_setup_home(&args[2..]),
         Some("demo") => cmd_demo(&args[2..]),
         Some("bench") => cmd_bench(&args[2..]),
         _ => {
@@ -1556,5 +1557,71 @@ fn cmd_doc_edit(a: &[String]) -> i32 {
     }
     let _ = std::fs::remove_file(&tmp);
     println!("doc edit [{writer}]: {applied} дельт");
+    0
+}
+
+fn cmd_setup_home(a: &[String]) -> i32 {
+    // emlbox setup-home [--dir ~/.mime] [--install]
+    let dir = a
+        .iter()
+        .position(|x| x == "--dir")
+        .and_then(|i| a.get(i + 1))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("{}/.mime", std::env::var("HOME").unwrap_or_else(|_| ".".into()))));
+    let install = a.iter().any(|x| x == "--install");
+    match std::fs::create_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) => return err(&format!("mkdir {}: {e}", dir.display())),
+    }
+    let e = "/home/lain/mime-os/target/release/emlbox";
+    // закладки
+    let bm = dir.join("bookmarks.eml");
+    if !bm.exists() {
+        if writer::build_file(&bm, "bm@home", "bookmarks", vec![writer::Part::raw("bms", "application/json", "bms.json", br#"{}"#.to_vec())]).is_err() {
+            return err("create bookmarks failed");
+        }
+        println!("created {}", bm.display());
+    }
+    // заметки
+    let nt = dir.join("notes.eml");
+    if !nt.exists() {
+        if writer::build_file(&nt, "notes@home", "notes", vec![writer::Part::raw("doc", "application/json", "doc.json", br#"{"lines":[]}"#.to_vec())]).is_err() {
+            return err("create notes failed");
+        }
+        println!("created {}", nt.display());
+    }
+    // строки автозапуска (Hyprland exec-once)
+    let bm_s = format!("{e} sync daemon {} --addr 127.0.0.1:9601 --interval 15", bm.display());
+    let maildir = format!("{}/.mail", dir.display());
+    let watch_s = format!("{e} mail watch {maildir} {} --interval 30", bm.display());
+    println!("\nАвтозапуск (добавь в ~/.config/hypr/hyprland.conf):");
+    println!("  exec-once = {bm_s}");
+    println!("  exec-once = {watch_s}");
+    if install {
+        let conf = format!("{}/.config/hypr/hyprland.conf", std::env::var("HOME").unwrap_or_else(|_| ".".into()));
+        let text = match std::fs::read_to_string(&conf) {
+            Ok(t) => t,
+            Err(e) => return err(&format!("read {conf}: {e}")),
+        };
+        if !text.contains("sync daemon") && !text.contains(&bm_s) {
+            let backup = format!("{conf}.bak");
+            if !std::path::Path::new(&backup).exists() {
+                let _ = std::fs::copy(&conf, &backup);
+                println!("бэкап: {backup}");
+            }
+            let mut out = text;
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&format!("# MIME-OS home mesh\n  exec-once = {bm_s}\n  exec-once = {watch_s}\n"));
+            match std::fs::write(&conf, &out) {
+                Ok(()) => println!("hyprland.conf обновлён (демоны стартуют при входе)"),
+                Err(e) => return err(&format!("write {conf}: {e}")),
+            }
+        } else {
+            println!("hyprland.conf уже содержит демоны");
+        }
+    }
+    println!("\nДомашний mesh готов: {} + {} (демоны: sync daemon, mail watch)", bm.display(), nt.display());
     0
 }
