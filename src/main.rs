@@ -839,7 +839,31 @@ fn cmd_mail(a: &[String]) -> i32 {
                 Err(e) => err(&e),
             }
         }
-        _ => err("mail subcommands: pack|apply|receive"),
+        "watch" => {
+            // mail watch <maildir> <container> [--interval N] — фоновый приём
+            let maildir = match path_arg(a, 1, "maildir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let container = match path_arg(a, 2, "container") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let interval: u64 = flag("--interval").and_then(|s| s.parse().ok()).unwrap_or(10);
+            println!("mail watch: {maildir:?} -> {container:?}, interval {interval}s");
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(interval));
+                match mail::receive(&container, &maildir) {
+                    Ok((applied, pending)) => {
+                        if applied > 0 || pending > 0 {
+                            println!("  [{:?}] applied {applied}, pending {pending}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+                        }
+                    }
+                    Err(e) => println!("  receive: {e}"),
+                }
+            }
+        }
+        _ => err("mail subcommands: pack|apply|receive|watch"),
     }
 }
 

@@ -32,7 +32,7 @@
 | **Mesh-демо** | `sync serve/connect/converge/daemon` | живой mesh: `daemon --peers` синкается автоматически по таймеру |
 | **Совместные документы** | `doc init/add/set/del/list/edit/log/revert` | CRDT-документ: правка в $EDITOR, история изменений, откат |
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
-| **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
+| **SMTP-мост** | `mail pack/apply/receive/watch` | контейнеры путешествуют письмами; `watch` — фоновый приём из Maildir |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |
 | **GUI** | `emlbox-gui [file]` (feature `gui`) | egui-просмотрщик: секции, дельты, KV, документы (add/revert), verify |
 
