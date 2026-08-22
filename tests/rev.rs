@@ -152,3 +152,20 @@ int main(){ A a; B b; return a.f() + b.g(); }
     let max_run = cands.iter().map(|(_, n, _)| *n).max().unwrap_or(0);
     assert!(max_run >= 4, "vtable с ~5 указателями: {cands:?}");
 }
+
+#[test]
+fn decompile_lifts_asm_to_pseudocode() {
+    let body = vec![
+        "115a:\t55                    \tpush   rbp".to_string(),
+        "115b:\t48 89 e5              \tmov    rbp,rsp".to_string(),
+        "1162:\t48 89 7d f8           \tmov    QWORD PTR [rbp-0x8],rdi".to_string(),
+        "1186:\te8 xx                 \tcall   1119 <net_send>".to_string(),
+        "1190:\tc3                    \tret".to_string(),
+    ];
+    let c = rev::decompile(&body);
+    let joined = c.join("\n");
+    assert!(joined.contains("rbp = rsp;"), "{joined}");
+    assert!(joined.contains("*[rbp-0x8] = rdi;"), "{joined}");
+    assert!(joined.contains("net_send(...);"), "{joined}");
+    assert!(joined.contains("return;"), "{joined}");
+}

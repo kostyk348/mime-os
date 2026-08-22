@@ -301,7 +301,7 @@ fn passing_param(dir: &Path, f: &str, callee: &str, arg_n: usize) -> Option<usiz
 }
 
 /// Тело функции f (строки листинга).
-fn body_of(dir: &Path, f: &str) -> Option<Vec<String>> {
+pub fn body_of(dir: &Path, f: &str) -> Option<Vec<String>> {
     let b = EmlBox::open(&func_file(dir, f)).ok()?;
     let s = b.section("listing")?;
     Some(String::from_utf8_lossy(&s).lines().map(|l| l.trim().to_string()).collect())
@@ -1069,4 +1069,125 @@ pub fn vftables(binary: &Path) -> Result<Vec<(u64, usize, Vec<u64>)>, String> {
     }
     cands.sort_by_key(|(_, n, _)| std::cmp::Reverse(*n));
     Ok(cands)
+}
+
+/// Лифтер asm -> псевдо-C (v0.1, линейный + goto). Читаемость ради которой
+/// нужен декомпилятор; без CFG-структурирования (if/loop — позже).
+pub fn decompile(body: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in body {
+        let l = line.to_ascii_lowercase();
+        // достаём мнемонику и операнды (после адреса и hex-байт)
+        let Some(tab) = l.rfind('\t') else { continue };
+        let m = &l[tab + 1..];
+        let m = m.trim();
+        if m.is_empty() {
+            continue;
+        }
+        out.push(translate(m));
+    }
+    out
+}
+
+fn translate(m: &str) -> String {
+    let mut it = m.split_whitespace();
+    let op = it.next().unwrap_or("");
+    let rest: Vec<&str> = it.collect();
+    let args = rest.join(" ");
+    match op {
+        "mov" | "movabs" => assign(&args),
+        "movzx" | "movsxd" | "movsx" => assign(&args),
+        "lea" => {
+            let (dst, src) = split2(&args);
+            format!("{dst} = &{};", src_of(&src))
+        }
+        "add" => arith(&args, "+="),
+        "sub" => arith(&args, "-="),
+        "imul" | "mul" => arith(&args, "*="),
+        "xor" => arith(&args, "^="),
+        "and" => arith(&args, "&="),
+        "or" => arith(&args, "|="),
+        "shl" => arith(&args, "<<="),
+        "shr" | "sar" => arith(&args, ">>="),
+        "inc" => format!("{}++;", reg_of(&args)),
+        "dec" => format!("{}--;", reg_of(&args)),
+        "neg" => format!("{} = -{};", reg_of(&args), reg_of(&args)),
+        "not" => format!("{} = ~{};", reg_of(&args), reg_of(&args)),
+        "cmp" => format!("/* cmp {args} */"),
+        "test" => format!("/* test {args} */"),
+        "call" => {
+            let name = args.trim_start_matches("0x").split_whitespace().last().unwrap_or("?").trim_matches(['<', '>']);
+            format!("{name}(...);")
+        }
+        "jmp" => format!("goto {addr};", addr = target(&args)),
+        "je" | "jz" => format!("if (==) goto {addr};", addr = target(&args)),
+        "jne" | "jnz" => format!("if (!=) goto {addr};", addr = target(&args)),
+        "jg" | "jnle" => format!("if (>) goto {addr};", addr = target(&args)),
+        "jge" | "jnl" => format!("if (>=) goto {addr};", addr = target(&args)),
+        "jl" | "jnge" => format!("if (<) goto {addr};", addr = target(&args)),
+        "jle" | "jng" => format!("if (<=) goto {addr};", addr = target(&args)),
+        "ja" | "jnbe" => format!("if (u>) goto {addr};", addr = target(&args)),
+        "jb" | "jc" => format!("if (u<) goto {addr};", addr = target(&args)),
+        "push" => format!("push {args};"),
+        "pop" => format!("pop {args};"),
+        "ret" | "retq" => "return;".to_string(),
+        "nop" | "endbr64" => String::new(),
+        "leave" => String::new(),
+        "sete" | "setne" | "setg" | "setl" => format!("{args} = cond;"),
+        "cdqe" | "cqo" => String::new(),
+        other => format!("/* {other} {args} */"),
+    }
+}
+
+fn split2(args: &str) -> (String, String) {
+    match args.split_once(',') {
+        Some((a, b)) => (dst_of(a), b.trim().to_string()),
+        None => (dst_of(args), String::new()),
+    }
+}
+
+/// Левая часть: регистр или "*память" (обрабатывает "qword ptr [rbp-8]").
+fn dst_of(a: &str) -> String {
+    let a = a.trim();
+    if let Some(b) = a.rfind('[') {
+        return format!("*[{}]", mem(&a[b..]));
+    }
+    a.split_whitespace().next().unwrap_or("").trim_matches(',').to_string()
+}
+
+/// Правая часть: значение или "*память" (ищет [..] в любом месте).
+fn src_of(s: &str) -> String {
+    let s = s.trim();
+    if let Some(b) = s.rfind('[') {
+        return format!("*[{}]", mem(&s[b..]));
+    }
+    s.to_string()
+}
+
+fn assign(args: &str) -> String {
+    let (dst, src) = split2(args);
+    if src.is_empty() {
+        return format!("{dst} = 0;");
+    }
+    let src = src_of(&src);
+    format!("{dst} = {src};")
+}
+
+fn arith(args: &str, op: &str) -> String {
+    let (dst, src) = split2(args);
+    let src = src_of(&src);
+    format!("{dst} {op} {src};")
+}
+
+fn mem(s: &str) -> String {
+    // [rbp-8] -> (rbp-8), [rax+0x10] -> (rax+0x10)
+    s.trim().trim_start_matches('[').trim_end_matches(']').to_string()
+}
+
+fn reg_of(s: &str) -> String {
+    s.split_whitespace().next().unwrap_or("").trim_matches(',').to_string()
+}
+
+fn target(args: &str) -> String {
+    args.split_whitespace().last().unwrap_or("?").to_string()
 }

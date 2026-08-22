@@ -566,7 +566,7 @@ fn cmd_tagdb(a: &[String]) -> i32 {
 
 fn cmd_rev(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
-    let _flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
     match sub {
         "type" => {
             // rev type <dir> <func> arg0 <Type>  — пометить тип (depth 0)
@@ -718,6 +718,79 @@ fn cmd_rev(a: &[String]) -> i32 {
                     }
                     Err(e) => err(&e),
                 }
+            }
+        }
+        "strings" => {
+            // rev strings <binary> [--func NAME] — строки, на которые ссылается функция
+            let binary = match path_arg(a, 1, "binary") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let func = flag("--func").unwrap_or_default();
+            let out = std::process::Command::new("objdump").args(["-d", "-M", "intel"]).arg(&binary).output().map_err(|e| e.to_string()).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            let mut in_func = func.is_empty();
+            let mut strings: Vec<String> = Vec::new();
+            for line in text.lines() {
+                let l = line.trim();
+                if l.ends_with(">:") && l.contains(" <") {
+                    in_func = func.is_empty() || l.contains(&format!("<{func}>:"));
+                    continue;
+                }
+                if !in_func {
+                    continue;
+                }
+                // комментарий objdump: "# <label>" — ссылка на строку
+                if let Some(ci) = l.find(" # <") {
+                    let label = l[ci + 4..].trim_end_matches('>').to_string();
+                    if !strings.contains(&label) {
+                        strings.push(label);
+                    }
+                }
+            }
+            println!("строки{}: {}", if func.is_empty() { " (все ссылки)" } else { &format!(" функции {func}") }, strings.len());
+            for s in &strings {
+                println!("  {s}");
+            }
+            0
+        }
+        "dot" => {
+            // rev dot <dir> — граф в DOT (Graphviz)
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            match rev::graph(&dir) {
+                Ok(g) => {
+                    println!("digraph rev {{");
+                    for (name, callees) in &g {
+                        for c in callees {
+                            println!("  \"{}\": \"{}\";", name, c);
+                        }
+                    }
+                    println!("}}");
+                    0
+                }
+                Err(e) => err(&e),
+            }
+        }
+        "decomp" => {
+            // rev decomp <dir> <func> — лифтер псевдо-C
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let func = a.get(2).cloned().unwrap_or_default();
+            match rev::body_of(&dir, &func) {
+                Some(body) => {
+                    for line in rev::decompile(&body) {
+                        if !line.is_empty() {
+                            println!("{line}");
+                        }
+                    }
+                    0
+                }
+                None => err("function not found"),
             }
         }
         "vftables" => {
