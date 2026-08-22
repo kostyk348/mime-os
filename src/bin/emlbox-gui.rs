@@ -27,6 +27,8 @@ struct App {
     error: Option<String>,
     tab: Tab,
     selected: Option<Selected>,
+    doc_input: String,
+    doc_revert: String,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -34,6 +36,7 @@ enum Tab {
     Sections,
     Deltas,
     Kv,
+    Doc,
     Verify,
 }
 
@@ -52,6 +55,8 @@ impl App {
             error: None,
             tab: Tab::Sections,
             selected: None,
+            doc_input: String::new(),
+            doc_revert: String::new(),
         };
         a.open();
         a
@@ -66,11 +71,6 @@ impl App {
             }
             Err(e) => self.error = Some(e),
         }
-    }
-
-            }
-        }
-        out
     }
 }
 
@@ -99,6 +99,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.tab, Tab::Sections, "Sections");
                 ui.selectable_value(&mut self.tab, Tab::Deltas, "Deltas");
                 ui.selectable_value(&mut self.tab, Tab::Kv, "KV");
+                ui.selectable_value(&mut self.tab, Tab::Doc, "Doc");
                 ui.selectable_value(&mut self.tab, Tab::Verify, "Verify");
             });
         });
@@ -159,6 +160,43 @@ impl eframe::App for App {
                         for t in &kv_tables {
                             if ui.selectable_label(new_selected == Some(Selected::Table(t.clone())), t).clicked() {
                                 new_selected = Some(Selected::Table(t.clone()));
+                            }
+                        }
+                    }
+                    Tab::Doc => {
+                        ui.heading("Документ (doc)");
+                        ui.label("Строки документа в таблице doc/lines");
+                        if ui.button("Показать документ").clicked() {
+                            new_selected = Some(Selected::Table("doc".to_string()));
+                        }
+                        ui.separator();
+                        ui.label("Добавить строку:");
+                        ui.add(egui::TextEdit::singleline(&mut self.doc_input).desired_width(200.0));
+                        if ui.button("Add").clicked() && !self.doc_input.trim().is_empty() {
+                            let text = self.doc_input.clone();
+                            let r = emlbox::kv::add(std::path::Path::new(&self.path), "gui", "doc", "lines", serde_json::Value::String(text), None);
+                            match r {
+                                Ok(_) => {
+                                    self.open();
+                                    self.doc_input.clear();
+                                }
+                                Err(e) => self.error = Some(e),
+                            }
+                        }
+                        ui.separator();
+                        ui.label("Откатить N дельт:");
+                        ui.add(egui::TextEdit::singleline(&mut self.doc_revert).desired_width(60.0));
+                        if ui.button("Revert").clicked() {
+                            if let Ok(n) = self.doc_revert.trim().parse::<usize>() {
+                                let total = self.b.as_ref().map(|b| b.tail_entries().len()).unwrap_or(0);
+                                let r = emlbox::repair::truncate_blocks(std::path::Path::new(&self.path), total.saturating_sub(n));
+                                match r {
+                                    Ok(_) => {
+                                        self.open();
+                                        self.doc_revert.clear();
+                                    }
+                                    Err(e) => self.error = Some(e),
+                                }
                             }
                         }
                     }

@@ -34,7 +34,7 @@
 | **X-Encoding** | `create --enc aes\|deflate` | секции и дельты: deflate-сжатие, aes-256-gcm шифрование (ключ EMLBOX_KEY/EMLBOX_PASS) |
 | **SMTP-мост** | `mail pack/apply/receive` | контейнеры путешествуют как настоящие письма: MIME + Maildir (Thunderbird) |
 | **Сайт-генератор** | `site new`, `site <posts> <out>` | посты = .eml-контейнеры → статический сайт (mini-markdown) |
-| **GUI** | `emlbox-gui [file]` (feature `gui`) | egui-просмотрщик: секции, дельты по писателям, KV, verify |
+| **GUI** | `emlbox-gui [file]` (feature `gui`) | egui-просмотрщик: секции, дельты, KV, документы (add/revert), verify |
 
 46 тестов зелёные, спецификация: [`docs/FORMAT.md`](docs/FORMAT.md).
 

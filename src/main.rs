@@ -979,8 +979,8 @@ fn cmd_sync(a: &[String]) -> i32 {
                         Err(e) => println!("  {peer}: {e}"),
                     }
                 }
+                let _ = container; // loop бесконечен; выход по сигналу
             }
-            0
         }
         "heads" => {
             let container = match path_arg(a, 1, "container") {
