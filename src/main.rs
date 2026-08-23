@@ -815,6 +815,78 @@ fn cmd_rev(a: &[String]) -> i32 {
                 None => err("function not found"),
             }
         }
+        "report" => {
+            // rev report <binary> [dir] — сводный отчёт
+            let binary = match path_arg(a, 1, "binary") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let dir = a.get(2).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(format!("{}_cells", binary.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())));
+            if !dir.exists() {
+                match rev::analyze(&binary, &dir) {
+                    Ok(n) => println!("нарезано функций: {n}"),
+                    Err(e) => return err(&e),
+                }
+            } else {
+                println!("функций (кэш): {}", std::fs::read_dir(&dir).map(|r| r.flatten().count()).unwrap_or(0));
+            }
+            // vftables
+            match rev::vftables(&binary) {
+                Ok(cands) => {
+                    println!("vftable-кандидаты: {}", cands.len());
+                    for (off, n, _) in cands.iter().take(3) {
+                        println!("  {off:#x}: {n} указателей");
+                    }
+                }
+                Err(_) => {}
+            }
+            // recon
+            match rev::recon(&binary) {
+                Ok((strings, regions)) => {
+                    println!("строк (>=6): {}", strings.len());
+                    let comp = regions.iter().filter(|(_, _, _, c)| *c == "compressed").count();
+                    let plain = regions.iter().filter(|(_, _, _, c)| *c == "plain").count();
+                    println!("энтропия: {} регионов (code/plain/compressed = {}/{}/{})", regions.len(), regions.len() - comp - plain, plain, comp);
+                }
+                Err(_) => {}
+            }
+            // топ-функции по числу каллеров
+            match rev::graph(&dir) {
+                Ok(g) => {
+                    let mut caller_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    for (_, callees) in &g {
+                        for c in callees {
+                            *caller_count.entry(c.clone()).or_default() += 1;
+                        }
+                    }
+                    let mut top: Vec<(String, usize)> = caller_count.into_iter().collect();
+                    top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+                    println!("\nсамые вызываемые:");
+                    for (name, n) in top.iter().take(8) {
+                        println!("  {n}x {name}");
+                    }
+                }
+                Err(_) => {}
+            }
+            // декомп примера: самая вызываемая функция
+            if let Ok(g) = rev::graph(&dir) {
+                let mut caller_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for (_, callees) in &g {
+                    for c in callees {
+                        *caller_count.entry(c.clone()).or_default() += 1;
+                    }
+                }
+                if let Some((name, _)) = caller_count.into_iter().max_by_key(|(_, n)| *n) {
+                    if let Some(body) = rev::body_of(&dir, &name) {
+                        println!("\nпример декомпиляции: {name}");
+                        for line in rev::prettify(&rev::decompile_structured(&body)).lines().take(12) {
+                            println!("  {line}");
+                        }
+                    }
+                }
+            }
+            0
+        }
         "vftables" => {
             // rev vftables <binary>
             let binary = match path_arg(a, 1, "binary") {
