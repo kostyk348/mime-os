@@ -29,6 +29,7 @@ struct App {
     selected: Option<Selected>,
     doc_input: String,
     doc_revert: String,
+    rev_code: String,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -37,6 +38,7 @@ enum Tab {
     Deltas,
     Kv,
     Doc,
+    Rev,
     Verify,
 }
 
@@ -57,6 +59,7 @@ impl App {
             selected: None,
             doc_input: String::new(),
             doc_revert: String::new(),
+            rev_code: String::new(),
         };
         a.open();
         a
@@ -100,6 +103,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.tab, Tab::Deltas, "Deltas");
                 ui.selectable_value(&mut self.tab, Tab::Kv, "KV");
                 ui.selectable_value(&mut self.tab, Tab::Doc, "Doc");
+                ui.selectable_value(&mut self.tab, Tab::Rev, "Rev");
                 ui.selectable_value(&mut self.tab, Tab::Verify, "Verify");
             });
         });
@@ -200,6 +204,36 @@ impl eframe::App for App {
                             }
                         }
                     }
+                    Tab::Rev => {
+                        ui.heading("Декомпилятор");
+                        ui.label("Открой rev-клетку (функцию) и жми Декомпилировать");
+                        if ui.button("Декомпилировать").clicked() {
+                            let dir = std::path::Path::new(&self.path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+                            let func = std::path::Path::new(&self.path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                            if let Some(body) = emlbox::rev::body_of(&dir, &func) {
+                                let mut code = emlbox::rev::prettify(&emlbox::rev::decompile_structured(&body));
+                                let fields = emlbox::rev::fields_of(&dir, &func);
+                                if !fields.is_empty() {
+                                    let mut lines = String::new();
+                                    for line in code.lines() {
+                                        let mut l = line.to_string();
+                                        for (off, name) in &fields {
+                                            l = l.replace(&format!("+0x{off}"), &format!("+{name}"));
+                                        }
+                                        lines.push_str(&l);
+                                        lines.push('\n');
+                                    }
+                                    code = lines;
+                                }
+                                self.rev_code = code;
+                            } else {
+                                self.rev_code = "// не rev-клетка (нет секции listing)".to_string();
+                            }
+                        }
+                        if ui.button("Очистить").clicked() {
+                            self.rev_code.clear();
+                        }
+                    }
                     Tab::Verify => {
                         ui.heading("Verify");
                         if ui.button("Проверить целостность").clicked() {
@@ -268,7 +302,11 @@ impl eframe::App for App {
                             }
                         }
                         None => {
-                            ui.weak("Открой контейнер — слева список секций/дельт");
+                            if self.tab == Tab::Rev && !self.rev_code.is_empty() {
+                                ui.monospace(self.rev_code.clone());
+                            } else {
+                                ui.weak("Открой контейнер — слева список секций/дельт");
+                            }
                         }
                     }
                 }
