@@ -802,7 +802,23 @@ fn cmd_rev(a: &[String]) -> i32 {
                         }
                     }
                     if structured {
-                        print!("{}", rev::prettify(&rev::decompile_structured(&body)));
+                        let mut code = rev::prettify(&rev::decompile_structured(&body));
+                        // подставить имена полей: [arg0+0x670] -> [arg0+scrap]
+                        let fields = rev::fields_of(&dir, &func);
+                        if !fields.is_empty() {
+                            let mut lines = String::new();
+                            for line in code.lines() {
+                                let mut l = line.to_string();
+                                for (off, name) in &fields {
+                                    let pat = format!("+0x{off}");
+                                    l = l.replace(&pat, &format!("+{name}"));
+                                }
+                                lines.push_str(&l);
+                                lines.push('\n');
+                            }
+                            code = lines;
+                        }
+                        print!("{code}");
                     } else {
                         for line in rev::decompile(&body) {
                             if !line.is_empty() {
@@ -813,6 +829,23 @@ fn cmd_rev(a: &[String]) -> i32 {
                     0
                 }
                 None => err("function not found"),
+            }
+        }
+        "field" => {
+            // rev field <dir> <func> 0x670 scrap
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let func = a.get(2).cloned().unwrap_or_default();
+            let off = a.get(3).cloned().unwrap_or_default();
+            let name = a.get(4).cloned().unwrap_or_default();
+            match rev::field_mark(&dir, &func, &off, &name) {
+                Ok(()) => {
+                    println!("поле {off} -> {name} в {func}");
+                    0
+                }
+                Err(e) => err(&e),
             }
         }
         "report" => {

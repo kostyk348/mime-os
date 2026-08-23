@@ -225,3 +225,12 @@ fn prettify_names_stack_slots() {
     assert!(out.contains("param_1"), "{out}");
     assert!(!out.contains("[rbp-0x8]"), "{out}");
 }
+
+#[test]
+fn field_mark_and_substitution() {
+    let dir = cells("field");
+    rev::build(&dir, LISTING).unwrap();
+    rev::field_mark(&dir, "main", "0x10", "health").unwrap();
+    let f = rev::fields_of(&dir, "main");
+    assert_eq!(f.get("10").map(|s| s.as_str()), Some("health"));
+}

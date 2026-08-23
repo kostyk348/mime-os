@@ -1650,3 +1650,55 @@ pub fn prettify(code: &str) -> String {
     }
     out
 }
+
+/// Пометка поля структуры: X-Field-0x670: scrap в клетке (аналог type_mark,
+/// но для смещений). Декомпилятор подставляет имя в [arg0+0x670].
+pub fn field_mark(dir: &Path, func: &str, offset_hex: &str, name: &str) -> Result<(), String> {
+    let p = func_file(dir, func);
+    let b = EmlBox::open(&p)?;
+    let mut fields: Vec<(String, String)> = Vec::new();
+    for (k, v) in &b.headers {
+        if k.starts_with("X-Field-") {
+            fields.push((k.clone(), v.clone()));
+        }
+    }
+    let off = offset_hex.trim_start_matches("0x").to_ascii_lowercase();
+    let tkey = format!("X-Field-0x{off}");
+    if !fields.iter().any(|(k, _)| k == &tkey) {
+        fields.push((tkey, name.to_string()));
+    }
+    // пересоздать с полями (как rewrite, но X-Field-)
+    let listing = b.section("listing").ok_or("no listing")?;
+    let callees: Vec<String> = b
+        .headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+        .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+        .collect();
+    let refs: Vec<String> = callers(dir, func)?;
+    let mut extra = String::new();
+    extra.push_str("X-EML-Type: Reverse/Binary-Function\r\n");
+    extra.push_str(&to_header(&callees));
+    if !refs.is_empty() {
+        extra.push_str(&format!("References: {}\r\n", refs.join(", ")));
+    }
+    for (k, v) in &fields {
+        extra.push_str(&format!("{k}: {v}\r\n"));
+    }
+    let entity = format!("{}@{}", safe_name(func), BINARY);
+    build_file_with_headers(&p, &entity, func, &extra, vec![Part::raw("listing", "text/x-asm", "listing.txt", listing.to_vec())])
+        .map_err(|e| format!("field {func}: {e}"))
+}
+
+/// X-Field-* из клетки: HashMap "0x670" -> "scrap".
+pub fn fields_of(dir: &Path, func: &str) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    if let Ok(b) = EmlBox::open(&func_file(dir, func)) {
+        for (k, v) in &b.headers {
+            if let Some(off) = k.strip_prefix("X-Field-0x") {
+                out.insert(off.to_lowercase(), v.clone());
+            }
+        }
+    }
+    out
+}

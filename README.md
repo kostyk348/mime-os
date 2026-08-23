@@ -22,7 +22,7 @@
 | **eml-tag** | `tagdb insert/query/bench` | плоская теговая БД: header-only scan, corruption-proof |
 | **Сеть (multi-writer sync)** | `sync export/push/pull/apply/heads` | delta-sync: per-writer chains, LWW merge, идемпотентная доставка, verify каждой цепочки |
 | **Сеть (TCP transport)** | `sync serve/connect` | P2P delta-sync по TCP (чистый std::net): манифесты, инкрементальная передача блоков |
-| **Клеточный реверс** | `rev <binary> <dir>`, `rev report/decomp --struct/...` | .eml-граф, **декомпилятор: параметры в теле (arg0/arg1), std::string-подавление**, волны, ветки, vftables |
+| **Клеточный реверс** | `rev <binary> <dir>`, `rev report/decomp --struct/field/...` | .eml-граф, **декомпилятор: параметры, имена полей (rev field 0x670 scrap), string-подавление**, волны, ветки |
 | **Compaction** | `compact <c> [--out new]` | слияние дельт в base: секции консолидируются, цепочки сбрасываются к точке схождения |
 | **Подписи** | `EMLBOX_SEED` env | ed25519-подпись каждого дельта-блока, verify проверяет аутентичность |
 | **Compaction** | `compact <c>` | слияние дельт в base (точка схождения после синков) |
