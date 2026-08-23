@@ -189,3 +189,29 @@ fn structured_decompiler_finds_if() {
     assert!(call_pos.is_some() && call_pos.unwrap() > if_pos.unwrap(), "render_sprite внутри if: {out}");
     assert!(out.contains("return;"));
 }
+
+#[test]
+fn structured_decompiler_finds_while() {
+    // gcc -O0 while-паттерн: jmp вперёд на проверку, тело, jcc назад
+    let body = vec![
+        "1200:\t55              \tpush   rbp".to_string(),
+        "1201:\teb 0f           \tjmp    1212".to_string(),
+        "1203:\t8b 45 f8        \tmov    eax,DWORD PTR [rbp-0x8]".to_string(),
+        "1206:\t83 e8 0a        \tsub    eax,0xa".to_string(),
+        "1209:\t89 45 f8        \tmov    DWORD PTR [rbp-0x8],eax".to_string(),
+        "120c:\tbf 07 00 00 00  \tmov    edi,0x7".to_string(),
+        "1211:\te8 xx           \tcall   114a <render_sprite>".to_string(),
+        "1212:\t8b 45 f8        \tmov    eax,DWORD PTR [rbp-0x8]".to_string(),
+        "1215:\t85 c0           \ttest   eax,eax".to_string(),
+        "1217:\t7f ea           \tjg     1203".to_string(),
+        "1219:\tc9              \tleave".to_string(),
+        "121a:\tc3              \tret".to_string(),
+    ];
+    let out = rev::decompile_structured(&body);
+    assert!(out.contains("while (eax > 0) {"), "{out}");
+    let w = out.find("while").unwrap();
+    let call = out.find("render_sprite").unwrap();
+    assert!(call > w, "render_sprite внутри while: {out}");
+    // goto-артефакт входа подавлен
+    assert!(!out.contains("goto L1212"), "{out}");
+}

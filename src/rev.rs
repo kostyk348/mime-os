@@ -1268,7 +1268,31 @@ pub fn decompile_structured(body: &[String]) -> String {
             }
             "call" => {
                 let name = i.args.trim_start_matches("0x").split_whitespace().last().unwrap_or("?").trim_matches(['<', '>']);
-                b.insns.push(format!("{name}(...);"));
+                // аргументы из последних mov в регистры SysV (rdi,rsi,rdx,rcx,r8,r9)
+                let mut args: Vec<String> = Vec::new();
+                for line in b.insns.iter().rev().take(12) {
+                    if let Some((reg, val)) = line.split_once(" = ") {
+                        let reg = reg.trim();
+                        let idx = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+                            .iter()
+                            .position(|r| reg == *r || reg == format!("e{}", &r[1..]));
+                        if let Some(idx) = idx {
+                            let v = val.trim_end_matches(';').to_string();
+                            while args.len() <= idx {
+                                args.push("?".into());
+                            }
+                            // первый встреченный при обратном проходе = ближайший к call
+                            if args[idx] == "?" {
+                                args[idx] = v;
+                            }
+                        }
+                    }
+                }
+                if args.is_empty() {
+                    b.insns.push(format!("{name}(...);"));
+                } else {
+                    b.insns.push(format!("{name}({});", args.join(", ")));
+                }
             }
             other => {
                 let stmt = translate(&format!("{other} {}", i.args));
@@ -1281,6 +1305,20 @@ pub fn decompile_structured(body: &[String]) -> String {
     if let Some(b) = cur.take() {
         blocks.push(b);
     }
+    // предвычислить while-циклы (jcc назад)
+    let mut loops: Vec<(usize, usize, String)> = Vec::new(); // (check_idx, loop_start, cond)
+    for (bi, bl) in blocks.iter().enumerate() {
+        if let Some(rest) = bl.term.strip_prefix("jcc|") {
+            let mut parts = rest.splitn(2, '|');
+            let cond = parts.next().unwrap_or("").to_string();
+            let target = parts.next().unwrap_or("").to_string();
+            if let Some(li) = blocks.iter().position(|x| x.label.as_deref() == Some(&target)) {
+                if li <= bi {
+                    loops.push((bi, li, cond));
+                }
+            }
+        }
+    }
     // структурирование
     let mut out = String::new();
     let mut i = 0usize;
@@ -1292,13 +1330,60 @@ pub fn decompile_structured(body: &[String]) -> String {
         }
         let b = &blocks[i];
         let _indent = "";
+        // тело цикла: пропустить (эмитится внутри while на check-блоке)
+        if let Some((_, _ls, _)) = loops.iter().find(|(c, ls, _)| i >= *ls && i < *c) {
+            emitted.insert(i);
+            i += 1;
+            continue;
+        }
+        if let Some((_, ls, cond)) = loops.iter().find(|(c, _, _)| *c == i) {
+            let mut body = String::new();
+            if *ls < i {
+                for j in *ls..i {
+                    body.push_str(&block_body(&blocks[j], 4));
+                    emitted.insert(j);
+                }
+            } else {
+                // самоссылка (тело+проверка в одном блоке): тело = инсны блока
+                body.push_str(&block_body(&blocks[i], 4));
+            }
+            out.push_str(&format!("while ({cond}) {{\n{body}}}\n"));
+            emitted.insert(i);
+            i += 1;
+            continue;
+        }
         if b.term.starts_with("jcc|") {
-            // jcc -> if
+            // jcc -> while или if
             let parts: Vec<&str> = b.term.splitn(3, '|').collect();
             let cond = &parts[1];
             let target = parts[2];
             // найти блок с target-меткой
             let t_idx = blocks.iter().position(|x| x.label.as_deref() == Some(target));
+            // while: target вперёд, а блок перед ним — jmp назад к заголовку (этому блоку)
+            let mut is_while = false;
+            if let Some(k) = t_idx {
+                if k > i + 1 {
+                    if let Some(prev) = blocks.get(k - 1) {
+                        if prev.term.starts_with("jmp|") && b.label.as_deref() == Some(&prev.term[4..]) {
+                            is_while = true;
+                        }
+                    }
+                }
+            }
+            if is_while {
+                let k = t_idx.unwrap();
+                let mut body = String::new();
+                for j in (i + 1)..k {
+                    if !emitted.contains(&j) {
+                        body.push_str(&block_body(&blocks[j], 4));
+                        emitted.insert(j);
+                    }
+                }
+                out.push_str(&format!("while ({cond}) {{\n{body}}}\n"));
+                emitted.insert(i);
+                i = k - 1;
+                continue;
+            }
             let then_idx = i + 1;
             // else: блок после then, если он jmp к join
             // код ДО if — снаружи
@@ -1329,11 +1414,14 @@ pub fn decompile_structured(body: &[String]) -> String {
             emitted.insert(i);
         } else if b.term.starts_with("jmp|") {
             let target = b.term[4..].to_string();
-            // обратное ребро -> while? упрощённо: goto
             for insn in &b.insns {
                 out.push_str(&format!("{insn}\n"));
             }
-            out.push_str(&format!("goto {target};\n"));
+            // goto на check-блок цикла — артефакт gcc (вход в while) — подавляем
+            let is_loop_entry = loops.iter().any(|(c, _, _)| blocks[*c].label.as_deref() == Some(target.as_str()));
+            if !is_loop_entry {
+                out.push_str(&format!("goto {target};\n"));
+            }
             emitted.insert(i);
         } else {
             for insn in &b.insns {
@@ -1352,6 +1440,9 @@ pub fn decompile_structured(body: &[String]) -> String {
 fn block_body(b: &Block, indent: usize) -> String {
     let mut s = String::new();
     for insn in &b.insns {
+        if insn == "push rbp;" || insn == "rbp = rsp;" || insn.starts_with("rsp -= 0x") || insn == "pop rbp;" || insn == "leave;" {
+            continue;
+        }
         s.push_str(&format!("{}\n", " ".repeat(indent)));
         s.push_str(insn);
         s.push('\n');
