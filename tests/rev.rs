@@ -215,3 +215,13 @@ fn structured_decompiler_finds_while() {
     // goto-артефакт входа подавлен
     assert!(!out.contains("goto L1212"), "{out}");
 }
+
+#[test]
+fn prettify_names_stack_slots() {
+    let code = "*[rbp-0x8] = rdi;\n*[rbp-0xc] = esi;\nrax = *[rbp+0x10];\n";
+    let out = rev::prettify(code);
+    assert!(out.contains("local_8"), "{out}");
+    assert!(out.contains("local_c"), "{out}");
+    assert!(out.contains("param_1"), "{out}");
+    assert!(!out.contains("[rbp-0x8]"), "{out}");
+}

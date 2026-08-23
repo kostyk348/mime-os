@@ -1539,3 +1539,35 @@ fn build_cond(jcc: &str, test: &Option<(String, String, String)>) -> String {
         None => op.to_string(),
     }
 }
+
+/// Приукрасить псевдокод: стек-слоты -> локальные/параметры (стиль Ghidra).
+/// [rbp-0x8] -> local_8; [rbp+0x10] -> param_1 (первый аргумент SysV).
+pub fn prettify(code: &str) -> String {
+    let mut out = String::new();
+    for line in code.lines() {
+        let mut l = line.to_string();
+        // локальные: [rbp-0xNN]
+        let mut done = false;
+        while !done {
+            done = true;
+            for off in 0..0x200u32 {
+                let pat = format!("[rbp-0x{off:x}]");
+                if l.contains(&pat) {
+                    l = l.replace(&pat, &format!("local_{off:x}"));
+                    done = false;
+                }
+            }
+        }
+        // параметры: [rbp+0x10] -> param_1, +0x18 -> param_2 ...
+        for (off, p) in [(0x10u32, 1u32), (0x18, 2), (0x20, 3), (0x28, 4), (0x30, 5)] {
+            let pat = format!("[rbp+0x{off:x}]");
+            if l.contains(&pat) {
+                l = l.replace(&pat, &format!("param_{p}"));
+            }
+        }
+        // rbp/rsp чистые ссылки
+        out.push_str(&l);
+        out.push('\n');
+    }
+    out
+}

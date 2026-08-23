@@ -802,7 +802,7 @@ fn cmd_rev(a: &[String]) -> i32 {
                         }
                     }
                     if structured {
-                        print!("{}", rev::decompile_structured(&body));
+                        print!("{}", rev::prettify(&rev::decompile_structured(&body)));
                     } else {
                         for line in rev::decompile(&body) {
                             if !line.is_empty() {
