@@ -914,16 +914,19 @@ fn cmd_rev(a: &[String]) -> i32 {
                 Ok(p) => p,
                 Err(e) => return err(&e),
             };
+            let show_strings = a.iter().any(|x| x == "--strings");
             match rev::recon(&binary) {
                 Ok((strings, regions)) => {
                     println!("строк (>=6): {}; регионы энтропии: {}", strings.len(), regions.len());
                     for (s, e, h, class) in &regions {
                         println!("  [{class:10}] {s:#x}..{e:#x} entropy={h:.2}");
                     }
-                    println!("\nпримеры строк:");
-                    for (off, len, text) in strings.iter().take(12) {
-                        let t: String = text.chars().take(60).collect();
-                        println!("  {off:#x} ({len}b) {t}");
+                    if show_strings {
+                        println!("\nстроки:");
+                        for (off, len, text) in strings.iter().take(60) {
+                            let t: String = text.chars().take(70).collect();
+                            println!("  {off:#x} ({len}b) {t}");
+                        }
                     }
                     0
                 }

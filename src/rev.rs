@@ -1268,6 +1268,14 @@ pub fn decompile_structured(body: &[String]) -> String {
             }
             "call" => {
                 let name = i.args.trim_start_matches("0x").split_whitespace().last().unwrap_or("?").trim_matches(['<', '>']);
+                // std::string-операции — мусор для чтения
+                if name.starts_with("_ZNSs") || name.starts_with("_ZNSt6") || name.starts_with("_ZNKSs") {
+                    b.insns.push("// (std::string op)".to_string());
+                    if let Some(fin) = cur.take() {
+                        blocks.push(fin);
+                    }
+                    continue;
+                }
                 // аргументы из последних mov в регистры SysV (rdi,rsi,rdx,rcx,r8,r9)
                 let mut args: Vec<String> = Vec::new();
                 for line in b.insns.iter().rev().take(12) {
@@ -1317,6 +1325,32 @@ pub fn decompile_structured(body: &[String]) -> String {
                     loops.push((bi, li, cond));
                 }
             }
+        }
+    }
+    // параметры из пролога: "rbx = rdi" -> arg0, "ebp = esi" -> arg1 ...
+    let mut param_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if let Some(first) = blocks.first() {
+        for insn in &first.insns {
+            if let Some((dst, src)) = insn.split_once(" = ") {
+                let dst = dst.trim().to_string();
+                let src = src.trim_end_matches(';').trim().to_string();
+                let arg = match src.as_str() {
+                    "rdi" | "edi" => Some(0),
+                    "rsi" | "esi" => Some(1),
+                    "rdx" | "edx" => Some(2),
+                    "rcx" | "ecx" => Some(3),
+                    "r8" | "r8d" => Some(4),
+                    "r9" | "r9d" => Some(5),
+                    _ => None,
+                };
+                if let Some(n) = arg {
+                    param_map.insert(dst, format!("arg{n}"));
+                }
+            }
+        }
+        // сами входные регистры (для выражений/условий)
+        for (reg, n) in [("rdi", 0usize), ("esi", 1), ("edx", 2), ("ecx", 3), ("r8d", 4), ("r9d", 5), ("edi", 0), ("rsi", 1), ("rdx", 2), ("rcx", 3), ("r8", 4), ("r9", 5)] {
+            param_map.entry(reg.to_string()).or_insert_with(|| format!("arg{n}"));
         }
     }
     // структурирование
@@ -1388,6 +1422,9 @@ pub fn decompile_structured(body: &[String]) -> String {
             // else: блок после then, если он jmp к join
             // код ДО if — снаружи
             for insn in &b.insns {
+                if insn.starts_with("push ") || insn.starts_with("pop ") || insn.starts_with("rsp -= 0x") || insn == "rbp = rsp;" || insn == "leave;" {
+                    continue;
+                }
                 out.push_str(&format!("{insn}\n"));
             }
             // then-блок
@@ -1415,6 +1452,9 @@ pub fn decompile_structured(body: &[String]) -> String {
         } else if b.term.starts_with("jmp|") {
             let target = b.term[4..].to_string();
             for insn in &b.insns {
+                if insn.starts_with("push ") || insn.starts_with("pop ") || insn.starts_with("rsp -= 0x") || insn == "rbp = rsp;" || insn == "leave;" {
+                    continue;
+                }
                 out.push_str(&format!("{insn}\n"));
             }
             // goto на check-блок цикла — артефакт gcc (вход в while) — подавляем
@@ -1425,6 +1465,9 @@ pub fn decompile_structured(body: &[String]) -> String {
             emitted.insert(i);
         } else {
             for insn in &b.insns {
+                if insn.starts_with("push ") || insn.starts_with("pop ") || insn.starts_with("rsp -= 0x") || insn == "rbp = rsp;" || insn == "leave;" {
+                    continue;
+                }
                 out.push_str(&format!("{insn}\n"));
             }
             if b.term == "ret" {
@@ -1434,13 +1477,49 @@ pub fn decompile_structured(body: &[String]) -> String {
         }
         i += 1;
     }
+    // применить имена параметров к выводу
+    if !param_map.is_empty() {
+        let mut final_out = String::new();
+        let mut overwritten: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for line in out.lines() {
+            let l = line.to_string();
+            let lhs = l.split_once(" = ").map(|(a, _)| a.trim().to_string());
+            // калибровка пролога "arg0 = rdi" — подавить (это сигнатура)
+            if let Some(dst) = &lhs {
+                if let Some(reg) = param_map.get(dst) {
+                    let rhs = l.split_once(" = ").map(|(_, b)| b.trim_end_matches(';').trim().to_string()).unwrap_or_default();
+                    let rhs_is_input = ["rdi", "esi", "edx", "rcx", "r8d", "r9d"].contains(&rhs.as_str())
+                        || ["rdi", "rsi", "rdx", "rcx", "r8", "r9"].contains(&rhs.as_str());
+                    if rhs_is_input {
+                        continue;
+                    }
+                    let _ = reg;
+                }
+            }
+            let mut nl = l.clone();
+            for (k, v) in &param_map {
+                if lhs.as_deref() == Some(k.as_str()) {
+                    // регистр перезаписан — дальше это не параметр
+                    overwritten.insert(k.clone());
+                    continue;
+                }
+                if overwritten.contains(k) {
+                    continue;
+                }
+                nl = nl.replace(k, v);
+            }
+            final_out.push_str(&nl);
+            final_out.push('\n');
+        }
+        out = final_out;
+    }
     out
 }
 
 fn block_body(b: &Block, indent: usize) -> String {
     let mut s = String::new();
     for insn in &b.insns {
-        if insn == "push rbp;" || insn == "rbp = rsp;" || insn.starts_with("rsp -= 0x") || insn == "pop rbp;" || insn == "leave;" {
+        if insn.starts_with("push ") || insn == "rbp = rsp;" || insn.starts_with("rsp -= 0x") || insn.starts_with("pop ") || insn == "leave;" {
             continue;
         }
         s.push_str(&format!("{}\n", " ".repeat(indent)));
