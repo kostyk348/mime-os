@@ -564,6 +564,45 @@ fn cmd_tagdb(a: &[String]) -> i32 {
     }
 }
 
+
+/// Декомпиляция одной клетки: сигнатура из волны + поля + структурированный код.
+fn decomp_one(dir: &std::path::Path, func: &str) -> Option<String> {
+    let body = rev::body_of(dir, func)?;
+    let mut out = String::new();
+    let cell = dir.join(format!("{func}.eml"));
+    if let Ok(b) = reader::EmlBox::open(&cell) {
+        let mut types: Vec<(usize, String)> = Vec::new();
+        for (k, v) in &b.headers {
+            if let Some(n) = k.strip_prefix("X-Type-arg") {
+                if let Ok(n) = n.parse::<usize>() {
+                    types.push((n, v.clone()));
+                }
+            }
+        }
+        if !types.is_empty() {
+            types.sort();
+            let args: Vec<String> = types.iter().map(|(n, t)| format!("{t} arg{n}")).collect();
+            out.push_str(&format!("// {}({})\n", func.split('@').next().unwrap_or(func), args.join(", ")));
+        }
+    }
+    let mut code = rev::prettify(&rev::decompile_structured(&body));
+    let fields = rev::fields_of(dir, func);
+    if !fields.is_empty() {
+        let mut lines = String::new();
+        for line in code.lines() {
+            let mut l = line.to_string();
+            for (off, name) in &fields {
+                l = l.replace(&format!("+0x{off}"), &format!("+{name}"));
+            }
+            lines.push_str(&l);
+            lines.push('\n');
+        }
+        code = lines;
+    }
+    out.push_str(&code);
+    Some(out)
+}
+
 fn cmd_rev(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
     let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
@@ -847,6 +886,75 @@ fn cmd_rev(a: &[String]) -> i32 {
                 }
                 Err(e) => err(&e),
             }
+        }
+        "decomp-all" => {
+            // rev decomp-all <dir> [--out file.c] [--filter substr]
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let filter = flag("--filter").unwrap_or_default();
+            let mut files: Vec<String> = match std::fs::read_dir(&dir) {
+                Ok(rd) => rd.flatten().filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().map(|x| x == "eml").unwrap_or(false) {
+                        p.file_stem().map(|s| s.to_string_lossy().to_string())
+                    } else { None }
+                }).collect(),
+                Err(e) => return err(&format!("read_dir: {e}")),
+            };
+            files.sort();
+            let mut out = String::new();
+            let mut n = 0usize;
+            for func in &files {
+                if !filter.is_empty() && !func.contains(&filter) { continue; }
+                if let Some(code) = decomp_one(&dir, func) {
+                    out.push_str(&format!("\n// ===== {} =====\n", func));
+                    out.push_str(&code);
+                    n += 1;
+                }
+            }
+            match flag("--out") {
+                Some(p) => match std::fs::write(&p, &out) {
+                    Ok(()) => {
+                        println!("декомпилировано {n} функций -> {p}");
+                        0
+                    }
+                    Err(e) => err(&format!("write {p}: {e}")),
+                },
+                None => {
+                    print!("{out}");
+                    0
+                }
+            }
+        }
+        "stats" => {
+            // rev stats <dir> — сводка по клеткам
+            let dir = match path_arg(a, 1, "dir") {
+                Ok(p) => p,
+                Err(e) => return err(&e),
+            };
+            let g = match rev::graph(&dir) {
+                Ok(g) => g,
+                Err(e) => return err(&e),
+            };
+            let total = g.len();
+            let edges: usize = g.iter().map(|(_, c)| c.len()).sum();
+            let mut sizes: Vec<(String, usize)> = Vec::new();
+            for (name, _) in &g {
+                if let Some(b) = rev::body_of(&dir, name) {
+                    sizes.push((name.clone(), b.len()));
+                }
+            }
+            sizes.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+            println!("функций: {total}, рёбер вызовов: {edges}");
+            println!("самые большие (строк asm):");
+            for (name, n) in sizes.iter().take(10) {
+                println!("  {n:5}  {name}");
+            }
+            let with_types = rev::type_map(&dir).map(|t| t.len()).unwrap_or(0);
+            println!("размечено типами: {with_types} функций");
+            0
         }
         "report" => {
             // rev report <binary> [dir] — сводный отчёт
