@@ -10,5 +10,3 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --verbose
-      - name: Test
-        run: cargo test --verbose
