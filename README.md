@@ -1,5 +1,9 @@
 # MIME-OS / EMLBox
 
+[![Release](https://img.shields.io/github/v/release/kostyk348/mime-os?sort=semver&color=blue)](https://github.com/kostyk348/mime-os/releases)
+[![License](https://img.shields.io/badge/license-Apache-2.0-green)](https://github.com/kostyk348/mime-os/blob/master/LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/kostyk348/mime-os?branch=master)](https://github.com/kostyk348/mime-os/commits/master)
+
 **Всё есть `.eml`.** Операционная среда, в которой атомарный строительный блок — RFC-совместимый MIME-документ, а не `.exe`, `.elf` или закрытая база данных.
 
 Один `.eml`-файл = целое приложение или сущность: код, GUI, состояние, KV-данные, бинарные ассеты и append-only лог изменений — в одном конверте, который читается через `mmap` по байт-оффсетам (без скана тела) и открывается любым текстовым редактором.
@@ -281,15 +285,19 @@ OP: ==  !=  >=  <=  >  <
 
 ```bash
 # устройство A
+
 emlbox kv set game.eml state x 47 --writer devA
 # устройство B
+
 emlbox kv set game.eml state y 205 --writer devB
 
 # B → шина → A
+
 emlbox sync push devB.eml --writer devB --bus /dev/shm/bus --to game
 emlbox sync pull devA.eml --bus /dev/shm/bus     # A получает чужие дельты
 
 # обратно: A → B
+
 emlbox sync push devA.eml --writer devA --bus /dev/shm/bus --to game
 emlbox sync pull devB.eml --bus /dev/shm/bus
 
@@ -354,4 +362,3 @@ Body: listing секция (assembly)
 get_function / get_callers / get_callees / cluster / wave / types / diff / graph).
 Модель читает только соседей клетки, а не весь листинг. Подключение в
 `opencode.json` как `"rev-mcp": { "command": "/path/rev-mcp" }`.
-
