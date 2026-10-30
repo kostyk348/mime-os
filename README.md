@@ -334,11 +334,11 @@ emlbox bench <dir>
 ┌──────────────┐  emlp-event   ┌──────────────┐
 │ view (html)  │ ────────────► │  IPC bus     │   .eml message spool directory
 └──────────────┘   msg.eml    └──────┬───────┘
-                                     │ To: == X-Entity-ID
-                                     ▼
+                                      │ To: == X-Entity-ID
+                                      ▼
                               ┌──────────────┐    ops → deltas
                               │  EML-Runner  │ ──────────────────┐
-                              │(logic section)│                  ▼
+                              │ (logic sect.)│                   ▼
                               └──────┬───────┘            ┌──────────────┐
                                      │ hal.emit()         │ game.eml     │
                                      ▼                    │ (one file:   │
