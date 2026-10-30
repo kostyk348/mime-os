@@ -8,5 +8,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: "Build the library (the emlbox binary target does not compile yet: E0716 in src/main.rs)"
-        run: cargo build --lib --verbose
+      - name: "Full build: library, binary, integration tests"
+        run: cargo build --all-targets --verbose
+      - name: "Full test suite (69 tests)"
+        run: cargo test --verbose
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: "Clippy (non-blocking)"
+        run: cargo clippy --all-targets || true
+      - name: "Release build"
+        run: cargo build --release

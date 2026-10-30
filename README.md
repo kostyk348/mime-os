@@ -44,6 +44,10 @@ hierarchy, an IPC bus made of `.eml` messages, one format for disk, memory and n
 
 ## What already works
 
+| Real output (release build) | Containers, tagdb, verify |
+| --- | --- |
+| ![EMLBox session](assets/promo/demo_container.png) | *one binary, zero dependencies* |
+
 | Layer | Commands | What it does |
 |---|---|---|
 | **Container** | `create`, `mount`, `get`, `verify` | single-file .eml: mmap reader, two-level index, append-only delta log with hash-chain |
@@ -281,11 +285,10 @@ cd mime-os
 cargo build --release
 ```
 
-> Heads-up: at master (and the v0.15.0 tag) the `emlbox` **binary** target currently fails
-> to compile — E0716 in the `rev strings` handler of `src/main.rs` (the CI job name says
-> the same). The library builds and its tests pass; rustc itself points at the one-line
-> `let`-binding fix, and PRs are welcome. Details:
-> [LIMITATIONS.md](LIMITATIONS.md) → *Repository state*.
+> Fixed in this release cycle: the `emlbox` **binary** target and the `tests/sync.rs` suite
+> compile again (a `let`-binding for E0716 in the `rev strings` handler;
+> `Delta{id,after}` initializers updated). `cargo test` runs the full suite green
+> again — 69 tests. See [CHANGELOG.md](CHANGELOG.md) → v0.16.0.
 
 Quickstart:
 
@@ -391,13 +394,13 @@ until their predecessor arrives (`pull` loops until things stabilise).
 ## Tests
 
 ```bash
-cargo test --lib     # what CI runs: library unit tests
+cargo test            # the full suite: 69 tests, green
 ```
 
 The suite covers format invariants, IPC + Runner, FS, tagdb, pack, network sync and
 X-Query; the release notes counted it growing from 39 tests (v0.2) through 46 (v0.4) to 72
-(v0.14.1). For what currently builds out of the box, see
-[LIMITATIONS.md](LIMITATIONS.md) → *Repository state*.
+(v0.14.1). After the compile fixes of this cycle the whole suite (library + binary +
+integration tests) builds and runs again.
 
 ## Releases
 

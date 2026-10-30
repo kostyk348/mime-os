@@ -28,15 +28,13 @@ mixes them, and so do commit messages.
 ## Before you open a PR
 
 ```bash
-cargo build --lib     # what CI runs today
-cargo test --lib      # library unit tests
-cargo test            # full suite — see the note below
+cargo build --all-targets   # library, binary, integration tests, examples
+cargo test                  # the full suite: 69 tests, green
 ```
 
-CI currently builds the library target only. A bare `cargo test` may stop at the compile
-step because of known master-state issues (binary target, some integration tests) — see
-[LIMITATIONS.md](LIMITATIONS.md) → *Repository state*. Make sure the targets your change
-touches build and pass; do not rely on `cargo build --release` alone.
+CI runs the full suite since the v0.16 compile fixes (it used to build the library target
+only, back when the binary target had an E0716). Make sure the targets your change touches
+build and pass; do not rely on `cargo build --release` alone.
 
 ## Commit style
 

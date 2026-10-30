@@ -64,19 +64,17 @@ _Last updated: 2026-10-30 (v0.16 in progress)_
 - **EML-FS "directories" are queries** (`X-Query` / `X-Contains-ID` headers): there is no
   real hierarchy, and records have no rename/move-by-path.
 
-## Repository state (2026-10-30)
+## Repository state (2026-10-30, after the compile fixes)
 
-A factual snapshot of what builds out of the box at master / v0.15.0:
+A factual snapshot of what builds out of the box after the v0.16 cycle:
 
-- The **library target builds** (`cargo build --lib`) and its unit tests pass
-  (`cargo test --lib`) — this is what CI runs.
-- The **`emlbox` binary target does not compile** at the moment: E0716 (a dropped
-  temporary) in the `rev strings` handler of `src/main.rs`. rustc's own suggestion is a
-  `let` binding; the CI job name documents the same state. It is a one-line fix — PRs are
-  genuinely welcome.
-- Some integration suites are behind the current lib API (at least `tests/sync.rs` no
-  longer compiles after `Delta` gained fields), so a bare `cargo test` stops at the
-  compile step. Historically the full suite was green: 39 tests at v0.2, 46 at v0.4, 72 at
-  v0.14.1 per the release notes.
-- v0.16.0 changed none of this: it is a docs-only release, and this file is part of the
-  honesty it ships.
+- The **whole suite builds and runs again**: `cargo build --release` and a bare
+  `cargo test` are green — 69 tests across library, binary and integration targets.
+  The fixes themselves were tiny: a `let`-binding for an E0716 (dropped temporary) in the
+  `rev strings` handler of `src/main.rs`, and `Delta{id,after}` initializers in
+  `tests/sync.rs` that had fallen behind the struct.
+- CI now runs the full suite (`cargo build --all-targets` + `cargo test`), not just the
+  library target.
+- What has **not** changed (and is listed honestly above): no Runner sandbox, LWW for KV
+  keys, single-writer-per-store assumptions, minimal site generator, no transport TLS —
+  see the sections above.

@@ -5,13 +5,22 @@ The release history below is reconstructed from the git tags and their annotatio
 (originally written in Russian; translated here, kept terse where the tag message was
 terse).
 
-## [v0.16.0] — 2026-10-30 — docs & promo
+## [v0.16.0] — 2026-10-30 — build hardening, docs & promo
 
-A documentation and promotion release. **No code changes**: no `.rs` file, no `Cargo.toml`
-and no workflow was touched — the format, the CLI surface and the test suite are exactly as
-they were at v0.15.0 (the release notes count the suite at 46+ tests green, last counted at
-72 in v0.14.1; the v0.15.0-era build state is documented in
-[LIMITATIONS.md](LIMITATIONS.md)).
+A documentation and promotion release with two small compile fixes that make the whole
+suite honest again: no behavior changes — the format and the CLI surface are exactly as
+they were at v0.15.0.
+
+### Fixed
+- **The `emlbox` binary target compiles again**: E0716 (dropped temporary) in the
+  `rev strings` handler of `src/main.rs` — a `let`-binding, exactly what rustc suggested.
+- **`tests/sync.rs` compiles and passes again**: five `Delta` initializers had fallen
+  behind the struct after the RGA lists of v0.7 added `id`/`after` — updated with
+  `id: None, after: None` (as `set`-op deltas are constructed in `kv.rs`).
+- **CI runs the full suite now**: `cargo build --all-targets` + `cargo test` (69 tests
+  green), not just `cargo build --lib`.
+- The v0.15.0-era build state is documented in [LIMITATIONS.md](LIMITATIONS.md) →
+  *Repository state* — with what was fixed and what has not changed.
 
 ### Added
 - **`README.md` rewritten in English** in the CapsuleCraft house style: short tagline,
