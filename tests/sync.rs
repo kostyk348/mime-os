@@ -65,8 +65,8 @@ fn two_devices_merge_chains() {
 #[test]
 fn conflict_lww_by_timestamp() {
     let (a, b, bus) = setup("lww");
-    let d1 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!("fromA"), ts: 100 };
-    let d2 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!("fromB"), ts: 200 };
+    let d1 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!("fromA"), ts: 100, id: None, after: None };
+    let d2 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!("fromB"), ts: 200, id: None, after: None };
     append_delta_w(&a, "devA", &d1).unwrap();
     append_delta_w(&b, "devB", &d2).unwrap();
     sync::push(&b, "devB", &bus, "game@system.local", 0).unwrap();
@@ -77,7 +77,7 @@ fn conflict_lww_by_timestamp() {
 
     // и наоборот: если бы devA был позже — выиграл бы он
     let (a2, b2, bus2) = setup("lww2");
-    let d1 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!("fromA"), ts: 300 };
+    let d1 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!("fromA"), ts: 300, id: None, after: None };
     append_delta_w(&a2, "devA", &d1).unwrap();
     append_delta_w(&b2, "devB", &d2).unwrap();
     sync::push(&b2, "devB", &bus2, "game@system.local", 0).unwrap();
@@ -89,8 +89,8 @@ fn conflict_lww_by_timestamp() {
 #[test]
 fn out_of_order_block_stays_pending() {
     let (a, b, bus) = setup("ooo");
-    let d1 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!(1), ts: 1 };
-    let d2 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!(2), ts: 2 };
+    let d1 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!(1), ts: 1, id: None, after: None };
+    let d2 = emlbox::format::Delta { op: "set".into(), table: "state".into(), key: "k".into(), value: json!(2), ts: 2, id: None, after: None };
     append_delta_w(&b, "devB", &d1).unwrap();
     append_delta_w(&b, "devB", &d2).unwrap();
 
