@@ -9,6 +9,7 @@ database — it is an RFC-822 `.eml` mail message. Code, GUI, state, KV data, bi
 and an append-only hash-chained delta log live in one envelope that is read through `mmap`
 by byte offsets and opens in any text editor.**
 
+[![CI](https://github.com/kostyk348/mime-os/actions/workflows/ci.yml/badge.svg)](https://github.com/kostyk348/mime-os/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kostyk348/mime-os?sort=semver&color=blue)](https://github.com/kostyk348/mime-os/releases)
 [![License](https://img.shields.io/badge/license-Apache-2.0-green)](https://github.com/kostyk348/mime-os/blob/master/LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/kostyk348/mime-os?branch=master)](https://github.com/kostyk348/mime-os/commits/master)
