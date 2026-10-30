@@ -787,7 +787,12 @@ fn cmd_rev(a: &[String]) -> i32 {
                     }
                 }
             }
-            println!("строки{}: {}", if func.is_empty() { " (все ссылки)" } else { &format!(" функции {func}") }, strings.len());
+            let scope = if func.is_empty() {
+                " (все ссылки)".to_string()
+            } else {
+                format!(" функции {func}")
+            };
+            println!("строки{scope}: {}", strings.len());
             for s in &strings {
                 println!("  {s}");
             }
