@@ -1,6 +1,7 @@
 <div align="center">
 
 # MIME-OS / EMLBox
+<img src="logo.png" alt="MimeOS" width="360">
 
 ### One file is the whole app.
 
