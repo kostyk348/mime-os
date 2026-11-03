@@ -95,12 +95,14 @@ fn tamper_detected_by_verify() {
     base_file(&p);
     kv::set(&p, "a", "x", json!(5)).unwrap();
 
-    // flip one byte inside base section "b" payload
-    let data = std::fs::read(&p).unwrap();
-    let b = EmlBox::open(&p).unwrap();
-    let sec = b.sections.iter().find(|s| s.id == "b").unwrap();
-    let mut data = data;
-    data[(sec.off + 1) as usize] ^= 0xff;
+    // flip one byte inside base section "b" payload; the mmap view must be
+    // closed before the file is rewritten (Windows: os error 1224)
+    let mut data = std::fs::read(&p).unwrap();
+    {
+        let b = EmlBox::open(&p).unwrap();
+        let sec = b.sections.iter().find(|s| s.id == "b").unwrap();
+        data[(sec.off + 1) as usize] ^= 0xff;
+    }
     std::fs::write(&p, &data).unwrap();
 
     let issues = verify::verify(&p).unwrap();

@@ -178,6 +178,15 @@ int main(){ A a; B b; return a.f() + b.g(); }
     {
         return;
     }
+    // the rev pipeline is ELF-only (binutils objdump): on macOS g++ produces
+    // mach-o, where the .text pointer-run scan does not apply — skip it
+    let bin_data = match std::fs::read(&bin) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    if !bin_data.starts_with(b"\x7fELF") {
+        return;
+    }
     let cands = rev::vftables(&bin).unwrap();
     let max_run = cands.iter().map(|(_, n, _)| *n).max().unwrap_or(0);
     assert!(max_run >= 4, "vtable с ~5 указателями: {cands:?}");
