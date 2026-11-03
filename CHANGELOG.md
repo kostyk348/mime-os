@@ -5,6 +5,48 @@ The release history below is reconstructed from the git tags and their annotatio
 (originally written in Russian; translated here, kept terse where the tag message was
 terse).
 
+## [v0.17.0] — 2026-11-03 — all fronts: query nesting, time travel, hard gates
+
+An engineering release: the two most-requested language features land (X-Query nesting
+from the roadmap, KV time travel enabled by the append-only design), and the project's
+quality gates go from advisory to blocking.
+
+### Added
+- **X-Query nesting** (`src/query.rs` v0.3) — parentheses at any depth with standard
+  precedence (`NOT` > `AND` > `OR`): `(X-Tag == "a" OR X-Tag == "b") AND NOT X-Timestamp < 100`.
+  Implemented as a quote-aware lexer + recursive-descent parser over an AST (`Q::Leaf /
+  Not / And / Or`), so quoted values now survive keywords too: `X-Note == "buy (milk)
+  AND eggs"` is one clause. Legacy `query::parse` keeps its AND-list contract; `fs index`
+  validates through `query::validate` (parenthesized queries are now legal there).
+- **KV time travel** (`src/kv.rs`) — the append-only delta log is a history:
+  `kv::table_at(b, table, n)` / `kv::get_at(...)` reconstruct the table state after the
+  first `n` deltas of the table (`--at 0` = the base section; a prefix longer than the
+  log is an error, not "now"). The replay order is fixed by `(ts, writer)`, so prefixes
+  are identical on every device. CLI: `emlbox kv get <path> <table> <key> --at N`.
+- **KV audit history** — `kv::history(b, table, key?)` and `emlbox kv history <path>
+  <table> [key]`: writer#seq, timestamp, op, key and value per delta, straight from the
+  file. Filterable by key; an unknown table yields an empty log, not an error.
+
+### Changed
+- **CI hardened** (`.github/workflows/ci.yml`): the build job runs the full suite on a
+  **three-OS matrix** (ubuntu / macos / windows); `cargo fmt --check` and
+  `cargo clippy --all-targets -- -D warnings` are now blocking gates instead of
+  `clippy || true`; a tag-push `release` job builds `emlbox` binaries for
+  linux-x86_64 (musl), macos-aarch64 and windows-x86_64 and attaches them to the
+  GitHub release automatically.
+- **Clippy: zero warnings** — all 37 pre-existing warnings fixed: type aliases for the
+  complex signatures (`rev::SiteMap`, `rev::RevDiff`, `rev::Recon`, `tagdb::Record`),
+  iterator loops instead of index loops (`rev` decompiler block walkers, `diff` line
+  merge), a `while let` frame loop in `sync`, collapsible `if let` in `fs`, unused
+  imports in tests. `cargo fmt` normalized across the codebase.
+- Crate version aligned with the release tags: 0.1.0 → 0.17.0.
+
+### Tests
+- 79 tests green (was 69): 6 new query tests (AST shape, parentheses, precedence,
+  quoted values, legacy `parse` contract, error cases) and 4 new KV time-travel tests
+  (set/del prefixes, RGA list prefixes, audit history, cross-writer determinism with the
+  same-second LWW contract documented in-test).
+
 ## [v0.16.0] — 2026-10-30 — build hardening, docs & promo
 
 A documentation and promotion release with two small compile fixes that make the whole
