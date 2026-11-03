@@ -64,7 +64,10 @@ fn wave_propagates_types_up_the_graph() {
     let tm = rev::type_map(&dir).unwrap();
     assert_eq!(tm.len(), 3);
     for (name, types) in &tm {
-        assert!(types.contains(&"X-Type-arg0=Packet".to_string()), "{name}: {types:?}");
+        assert!(
+            types.contains(&"X-Type-arg0=Packet".to_string()),
+            "{name}: {types:?}"
+        );
     }
 }
 
@@ -116,17 +119,32 @@ fn recon_classifies_regions() {
     // 8192 байт plain 'A' + 8192 случайных (высокая энтропия)
     let mut data = vec![b'A'; 8192];
     for _ in 0..8192 {
-        data.push((std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() % 256) as u8);
+        data.push(
+            (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+                % 256) as u8,
+        );
     }
     std::fs::write(&p, &data).unwrap();
     let (strings, regions) = rev::recon(&p).unwrap();
     // строки: куски 'A' длиной >= 6
-    assert!(strings.len() >= 1);
+    assert!(!strings.is_empty());
     // регионы: первые ~plain, потом высокоэнтропийные
     assert!(regions.len() >= 2);
     let classes: Vec<&str> = regions.iter().map(|(_, _, _, c)| *c).collect();
-    assert!(classes.iter().any(|c| *c == "plain" || *c == "code"), "{classes:?}");
-    assert!(classes.last().map(|c| *c == "compressed" || *c == "code").unwrap_or(false), "{classes:?}");
+    assert!(
+        classes.iter().any(|c| *c == "plain" || *c == "code"),
+        "{classes:?}"
+    );
+    assert!(
+        classes
+            .last()
+            .map(|c| *c == "compressed" || *c == "code")
+            .unwrap_or(false),
+        "{classes:?}"
+    );
 }
 
 #[test]
@@ -140,12 +158,33 @@ fn vftables_found_in_cpp_binary() {
     let _ = std::fs::create_dir_all(&dir);
     let src = dir.join("s.cpp");
     let bin = dir.join("s");
-    std::fs::write(&src, r#"
+    std::fs::write(
+        &src,
+        r#"
 struct A { virtual ~A(){} virtual int f() const { return 1; } virtual int g() const { return 2; } };
 struct B : A { int f() const override { return 10; } };
 int main(){ A a; B b; return a.f() + b.g(); }
-"#).unwrap();
-    if !std::process::Command::new("g++").args(["-O0", "-g"]).arg(&src).arg("-o").arg(&bin).status().map(|s| s.success()).unwrap_or(false) {
+"#,
+    )
+    .unwrap();
+    if !std::process::Command::new("g++")
+        .args(["-O0", "-g"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&bin)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    // the rev pipeline is ELF-only (binutils objdump): on macOS g++ produces
+    // mach-o, where the .text pointer-run scan does not apply — skip it
+    let bin_data = match std::fs::read(&bin) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    if !bin_data.starts_with(b"\x7fELF") {
         return;
     }
     let cands = rev::vftables(&bin).unwrap();
@@ -186,7 +225,10 @@ fn structured_decompiler_finds_if() {
     let if_pos = out.find("if (eax <= 0) {");
     assert!(if_pos.is_some(), "if найден: {out}");
     let call_pos = out.find("render_sprite");
-    assert!(call_pos.is_some() && call_pos.unwrap() > if_pos.unwrap(), "render_sprite внутри if: {out}");
+    assert!(
+        call_pos.is_some() && call_pos.unwrap() > if_pos.unwrap(),
+        "render_sprite внутри if: {out}"
+    );
     assert!(out.contains("return;"));
 }
 

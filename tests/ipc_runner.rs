@@ -30,13 +30,20 @@ fn ipc_roundtrip() {
 #[test]
 fn runner_processes_move_updates_state() {
     let (cont, bus) = setup("move");
-    ipc::send(&bus, "view", "game_arcade_v1", "MOVE", &json!({"dx": 5, "dy": -3})).unwrap();
+    ipc::send(
+        &bus,
+        "view",
+        "game_arcade_v1",
+        "MOVE",
+        &json!({"dx": 5, "dy": -3}),
+    )
+    .unwrap();
     let n = runner::run(&cont, &bus, true, 10).unwrap();
     assert_eq!(n, 1, "one event processed");
     let b = EmlBox::open(&cont).unwrap();
     assert_eq!(kv::get(&b, "state", "x").unwrap(), Some(json!(47))); // 42+5
     assert_eq!(kv::get(&b, "state", "y").unwrap(), Some(json!(105))); // 108-3
-    // message consumed
+                                                                      // message consumed
     assert_eq!(ipc::list(&bus).unwrap().len(), 0);
     // container still verifies clean (delta chain intact)
     assert!(emlbox::verify::verify(&cont).unwrap().is_empty());
@@ -65,7 +72,11 @@ fn unmatched_message_stays_pending() {
     ipc::send(&bus, "x", "other_service", "IGNORE", &json!({})).unwrap();
     let n = runner::run(&cont, &bus, true, 10).unwrap();
     assert_eq!(n, 0, "no matching events");
-    assert_eq!(ipc::list(&bus).unwrap().len(), 1, "unmatched stays for its owner");
+    assert_eq!(
+        ipc::list(&bus).unwrap().len(),
+        1,
+        "unmatched stays for its owner"
+    );
 }
 
 #[test]

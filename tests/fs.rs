@@ -13,21 +13,36 @@ fn setup(tag: &str) -> PathBuf {
         &store.join("game.eml"),
         "game_arcade_v1@system.local",
         "Retro Arcade",
-        vec![Part::raw("state", "application/json", "state.json", br#"{"x":0}"#.to_vec())],
+        vec![Part::raw(
+            "state",
+            "application/json",
+            "state.json",
+            br#"{"x":0}"#.to_vec(),
+        )],
     )
     .unwrap();
     build_file(
         &store.join("audio.eml"),
         "audio_engine@system.local",
         "Audio Engine",
-        vec![Part::raw("logic", "text/x-python", "logic.py", b"".to_vec())],
+        vec![Part::raw(
+            "logic",
+            "text/x-python",
+            "logic.py",
+            b"".to_vec(),
+        )],
     )
     .unwrap();
     build_file(
         &store.join("manual.eml"),
         "manual@system.local",
         "User Manual",
-        vec![Part::raw("doc", "text/markdown", "doc.md", b"# manual".to_vec())],
+        vec![Part::raw(
+            "doc",
+            "text/markdown",
+            "doc.md",
+            b"# manual".to_vec(),
+        )],
     )
     .unwrap();
     store
@@ -42,7 +57,10 @@ fn index_finds_containers_and_skips_non_containers() {
     let (recs, skipped) = fs::index(&store).unwrap();
     assert_eq!(recs.len(), 3);
     assert_eq!(skipped.len(), 1, "junk.eml must be skipped");
-    let game = recs.iter().find(|r| r.entity == "game_arcade_v1@system.local").unwrap();
+    let game = recs
+        .iter()
+        .find(|r| r.entity == "game_arcade_v1@system.local")
+        .unwrap();
     assert_eq!(game.eml_type, "Application/Unified");
     assert_eq!(game.subject, "Retro Arcade");
 }
@@ -52,16 +70,28 @@ fn tags_via_kv_delta_are_indexed() {
     let store = setup("tags");
     // tag game + audio dynamically (append deltas to their tags tables)
     let (recs, _) = fs::index(&store).unwrap();
-    let game = recs.iter().find(|r| r.entity == "game_arcade_v1@system.local").unwrap();
-    let audio = recs.iter().find(|r| r.entity == "audio_engine@system.local").unwrap();
+    let game = recs
+        .iter()
+        .find(|r| r.entity == "game_arcade_v1@system.local")
+        .unwrap();
+    let audio = recs
+        .iter()
+        .find(|r| r.entity == "audio_engine@system.local")
+        .unwrap();
     fs::tag(&store, &game.entity, "game").unwrap();
     fs::tag(&store, &game.entity, "arcade").unwrap();
     fs::tag(&store, &audio.entity, "game").unwrap();
     fs::tag(&store, &audio.entity, "audio").unwrap();
 
     let (recs, _) = fs::index(&store).unwrap();
-    let game = recs.iter().find(|r| r.entity == "game_arcade_v1@system.local").unwrap();
-    let audio = recs.iter().find(|r| r.entity == "audio_engine@system.local").unwrap();
+    let game = recs
+        .iter()
+        .find(|r| r.entity == "game_arcade_v1@system.local")
+        .unwrap();
+    let audio = recs
+        .iter()
+        .find(|r| r.entity == "audio_engine@system.local")
+        .unwrap();
     assert_eq!(game.tags, vec!["arcade", "game"]);
     assert_eq!(audio.tags, vec!["audio", "game"]);
 }
@@ -75,7 +105,10 @@ fn x_query_and_and_not() {
     assert_eq!(m.len(), 0, "no tags yet");
 
     // tag game only
-    let game = recs.iter().find(|r| r.entity == "game_arcade_v1@system.local").unwrap();
+    let game = recs
+        .iter()
+        .find(|r| r.entity == "game_arcade_v1@system.local")
+        .unwrap();
     fs::tag(&store, &game.entity, "game").unwrap();
     let (recs, _) = fs::index(&store).unwrap();
 
@@ -83,7 +116,11 @@ fn x_query_and_and_not() {
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].entity, "game_arcade_v1@system.local");
 
-    let m = fs::eval(&recs, "X-Tag == \"game\" AND X-EML-Type == \"Application/Unified\"").unwrap();
+    let m = fs::eval(
+        &recs,
+        "X-Tag == \"game\" AND X-EML-Type == \"Application/Unified\"",
+    )
+    .unwrap();
     assert_eq!(m.len(), 1);
 
     let m = fs::eval(&recs, "X-Tag != \"game\"").unwrap();
@@ -115,15 +152,27 @@ fn virtual_directory_query_and_contains() {
     let (recs, _) = fs::index(&store).unwrap();
     assert_eq!(recs.len(), 5, "3 containers + 2 directories");
 
-    let games = recs.iter().find(|r| r.entity == "games@system.local").unwrap();
+    let games = recs
+        .iter()
+        .find(|r| r.entity == "games@system.local")
+        .unwrap();
     assert_eq!(games.eml_type, "System/Directory");
-    let members: Vec<String> = fs::resolve(&recs, games).iter().map(|r| r.entity.clone()).collect();
+    let members: Vec<String> = fs::resolve(&recs, games)
+        .iter()
+        .map(|r| r.entity.clone())
+        .collect();
     assert_eq!(members.len(), 2, "game + audio match the query");
     assert!(members.iter().any(|e| e == "game_arcade_v1@system.local"));
     assert!(members.iter().any(|e| e == "audio_engine@system.local"));
 
-    let docs = recs.iter().find(|r| r.entity == "docs@system.local").unwrap();
-    let members: Vec<String> = fs::resolve(&recs, docs).iter().map(|r| r.entity.clone()).collect();
+    let docs = recs
+        .iter()
+        .find(|r| r.entity == "docs@system.local")
+        .unwrap();
+    let members: Vec<String> = fs::resolve(&recs, docs)
+        .iter()
+        .map(|r| r.entity.clone())
+        .collect();
     assert_eq!(members, vec!["manual@system.local"]);
 
     // dir with both: union, no dupes
@@ -135,7 +184,10 @@ fn virtual_directory_query_and_contains() {
     )
     .unwrap();
     let (recs, _) = fs::index(&store).unwrap();
-    let mixed = recs.iter().find(|r| r.entity == "mixed@system.local").unwrap();
+    let mixed = recs
+        .iter()
+        .find(|r| r.entity == "mixed@system.local")
+        .unwrap();
     let members = fs::resolve(&recs, mixed);
     assert_eq!(members.len(), 3, "union of query + explicit, no dupes");
 }

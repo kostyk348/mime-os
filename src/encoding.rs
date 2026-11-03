@@ -46,7 +46,8 @@ fn decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let mut d = ZlibDecoder::new(data);
     let mut out = Vec::new();
-    d.read_to_end(&mut out).map_err(|e| format!("deflate: {e}"))?;
+    d.read_to_end(&mut out)
+        .map_err(|e| format!("deflate: {e}"))?;
     Ok(out)
 }
 
@@ -58,7 +59,8 @@ fn key() -> Result<[u8; 32], String> {
         }
         let mut out = [0u8; 32];
         for i in 0..32 {
-            out[i] = u8::from_str_radix(&k[i * 2..i * 2 + 2], 16).map_err(|_| "bad hex in EMLBOX_KEY")?;
+            out[i] = u8::from_str_radix(&k[i * 2..i * 2 + 2], 16)
+                .map_err(|_| "bad hex in EMLBOX_KEY")?;
         }
         return Ok(out);
     }

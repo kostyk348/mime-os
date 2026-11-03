@@ -30,7 +30,10 @@ def emit(msg):
     ev = str(msg.get("event", "EVENT")).replace(" ", "_")
     body = msg.get("data", {})
     name = f"{int(time.time()*1e6)}_{os.getpid()}_{ev}.msg.eml"
-    with open(os.path.join(bus, name), "w") as f:
+    # newline="": keep the CRLFs we wrote ourselves — Windows text mode
+    # would turn them into CR-CR-LF and the bus parser would not find the
+    # blank line between headers and body
+    with open(os.path.join(bus, name), "w", newline="") as f:
         f.write(f"From: <{entity}@system.local>\r\nTo: <{to}>\r\nX-Event: {ev}\r\n"
                 f"X-EMLBox-Msg: v1\r\nContent-Type: application/json\r\n\r\n")
         f.write(json.dumps(body))
@@ -63,18 +66,27 @@ fn rand_suffix() -> u128 {
 pub fn run(container: &Path, bus: &Path, once: bool, idle_iters: u32) -> Result<i32, String> {
     let b = EmlBox::open(container)?;
     let entity = b.entity().ok_or("container has no X-Entity-ID")?;
-    let logic = b.section("logic").ok_or("container has no 'logic' section")?;
+    let logic = b
+        .section("logic")
+        .ok_or("container has no 'logic' section")?;
     let state = kv::table(&b, "state").map_err(|e| format!("state table: {e}"))?;
 
-    let dir = std::env::temp_dir().join(format!("emlbox_run_{}_{}", std::process::id(), rand_suffix()));
+    let dir = std::env::temp_dir().join(format!(
+        "emlbox_run_{}_{}",
+        std::process::id(),
+        rand_suffix()
+    ));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let logic_path = dir.join("logic.py");
     let harness_path = dir.join("harness.py");
     let state_path = dir.join("state.json");
     std::fs::write(&logic_path, logic).map_err(|e| e.to_string())?;
     std::fs::write(&harness_path, HARNESS).map_err(|e| e.to_string())?;
-    std::fs::write(&state_path, serde_json::to_vec(&state).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        &state_path,
+        serde_json::to_vec(&state).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
 
     let mut processed: i32 = 0;
     let mut idle = 0u32;
@@ -91,8 +103,11 @@ pub fn run(container: &Path, bus: &Path, once: bool, idle_iters: u32) -> Result<
             any = true;
 
             let event_path = dir.join("event.json");
-            std::fs::write(&event_path, serde_json::to_vec(&msg.body).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+            std::fs::write(
+                &event_path,
+                serde_json::to_vec(&msg.body).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
             let out = Command::new("python3")
                 .arg(&harness_path)
                 .arg(&logic_path)
@@ -104,21 +119,28 @@ pub fn run(container: &Path, bus: &Path, once: bool, idle_iters: u32) -> Result<
                 .output()
                 .map_err(|e| format!("python3: {e}"))?;
             if !out.status.success() {
-                return Err(format!("logic error: {}", String::from_utf8_lossy(&out.stderr)));
+                return Err(format!(
+                    "logic error: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                ));
             }
             let ops: Vec<Delta> =
                 serde_json::from_slice(&out.stdout).map_err(|e| format!("logic output: {e}"))?;
             for op in &ops {
                 match op.op.as_str() {
-                    "set" => kv::set(container, &op.table, &op.key, op.value.clone()).map_err(|e| e.to_string())?,
+                    "set" => kv::set(container, &op.table, &op.key, op.value.clone())
+                        .map_err(|e| e.to_string())?,
                     "del" => kv::del(container, &op.table, &op.key).map_err(|e| e.to_string())?,
                     other => return Err(format!("logic produced unknown op: {other}")),
                 };
             }
             // refresh state snapshot for the next event
             let st = kv::table(&EmlBox::open(container)?, "state").map_err(|e| e.to_string())?;
-            std::fs::write(&state_path, serde_json::to_vec(&st).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+            std::fs::write(
+                &state_path,
+                serde_json::to_vec(&st).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
 
             println!(
                 "[runner] {} <- {} : {} -> {} op(s), state deltas appended",

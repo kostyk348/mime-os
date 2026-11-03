@@ -23,13 +23,21 @@ pub fn new_post(path: &Path, title: &str, tags: &[String], body: &str) -> Result
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let extra = format!("X-Tag: {}\r\nX-Timestamp: {ts}\r\n", tags.join(", "));
-    let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let name = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
     build_file_with_headers(
         path,
         &name,
         title,
         &extra,
-        vec![Part::raw("body", "text/markdown", "body.md", body.as_bytes().to_vec())],
+        vec![Part::raw(
+            "body",
+            "text/markdown",
+            "body.md",
+            body.as_bytes().to_vec(),
+        )],
     )
 }
 
@@ -41,7 +49,10 @@ pub fn read_posts(dir: &Path) -> Result<Vec<Post>, String> {
         let p = e.path();
         if p.extension().map(|x| x == "eml").unwrap_or(false) {
             if let Ok(b) = EmlBox::open(&p) {
-                let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                let name = p
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 let title = b.header("Subject").unwrap_or(&name).to_string();
                 let ts: u64 = b
                     .header("X-Timestamp")
@@ -55,7 +66,13 @@ pub fn read_posts(dir: &Path) -> Result<Vec<Post>, String> {
                     .section("body")
                     .map(|s| String::from_utf8_lossy(&s).to_string())
                     .unwrap_or_default();
-                out.push(Post { name, title, ts, tags, body });
+                out.push(Post {
+                    name,
+                    title,
+                    ts,
+                    tags,
+                    body,
+                });
             }
         }
     }
@@ -77,12 +94,17 @@ pub fn build(posts_dir: &Path, out_dir: &Path) -> Result<usize, String> {
     };
     // index.html
     let mut items = String::new();
-    let mut tag_map: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut tag_map: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     for p in &posts {
         for t in &p.tags {
             tag_map.entry(t.clone()).or_default().push(p.name.clone());
         }
-        let date = if p.ts > 0 { epoch_date(p.ts) } else { "?".into() };
+        let date = if p.ts > 0 {
+            epoch_date(p.ts)
+        } else {
+            "?".into()
+        };
         let tags = p
             .tags
             .iter()
@@ -104,17 +126,38 @@ pub fn build(posts_dir: &Path, out_dir: &Path) -> Result<usize, String> {
         tag_html.push_str(&format!("<h2 id=\"{}\">{}</h2><ul>", esc(tag), esc(tag)));
         for n in names {
             let p = posts.iter().find(|p| &p.name == n).unwrap();
-            tag_html.push_str(&format!("<li><a href=\"post/{}.html\">{}</a></li>", esc(n), esc(&p.title)));
+            tag_html.push_str(&format!(
+                "<li><a href=\"post/{}.html\">{}</a></li>",
+                esc(n),
+                esc(&p.title)
+            ));
         }
         tag_html.push_str("</ul>");
     }
-    std::fs::write(out_dir.join("tags.html"), &page("Tags", &tag_html)).map_err(|e| e.to_string())?;
+    std::fs::write(out_dir.join("tags.html"), page("Tags", &tag_html))
+        .map_err(|e| e.to_string())?;
     // посты
     for p in &posts {
         let html = md(&p.body);
-        let tags = p.tags.iter().map(|t| format!("<a href=\"../tags.html\">#{}</a>", esc(t))).collect::<Vec<_>>().join(" ");
-        let body = format!("<h1>{}</h1><p><small>{} {}</small></p>{}{}", esc(&p.title), epoch_date(p.ts), tags, html, "<p><a href=\"../index.html\">← index</a></p>");
-        std::fs::write(out_dir.join("post").join(format!("{}.html", p.name)), &page(&p.title, &body)).map_err(|e| e.to_string())?;
+        let tags = p
+            .tags
+            .iter()
+            .map(|t| format!("<a href=\"../tags.html\">#{}</a>", esc(t)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let body = format!(
+            "<h1>{}</h1><p><small>{} {}</small></p>{}{}",
+            esc(&p.title),
+            epoch_date(p.ts),
+            tags,
+            html,
+            "<p><a href=\"../index.html\">← index</a></p>"
+        );
+        std::fs::write(
+            out_dir.join("post").join(format!("{}.html", p.name)),
+            page(&p.title, &body),
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(posts.len())
 }
@@ -132,7 +175,12 @@ pub fn export_hugo(posts_dir: &Path, content_dir: &Path) -> Result<usize, String
         } else {
             "1970-01-01".to_string()
         };
-        let tags = p.tags.iter().map(|t| format!("    - \"{}\"", t.replace('"', "\\\""))).collect::<Vec<_>>().join("\n");
+        let tags = p
+            .tags
+            .iter()
+            .map(|t| format!("    - \"{}\"", t.replace('"', "\\\"")))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut md = format!(
             "---\ntitle: \"{}\"\ndate: {date}\ntags:\n{tags}\n---\n\n{}",
             p.title.replace('"', "\\\""),
@@ -170,7 +218,9 @@ fn epoch_date(ts: u64) -> String {
 }
 
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Мини-markdown: заголовки, код, списки, параграфы, ссылки, жирный.

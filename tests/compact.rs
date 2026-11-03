@@ -5,7 +5,6 @@ use emlbox::kv;
 use emlbox::verify;
 use emlbox::writer::{build_file, Part};
 use serde_json::json;
-use std::path::PathBuf;
 
 #[test]
 fn compact_preserves_state_and_clears_deltas() {
@@ -13,7 +12,18 @@ fn compact_preserves_state_and_clears_deltas() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let p = dir.join("db.eml");
-    build_file(&p, "db@system.local", "db", vec![Part::raw("state", "application/json", "state.json", br#"{"n":0}"#.to_vec())]).unwrap();
+    build_file(
+        &p,
+        "db@system.local",
+        "db",
+        vec![Part::raw(
+            "state",
+            "application/json",
+            "state.json",
+            br#"{"n":0}"#.to_vec(),
+        )],
+    )
+    .unwrap();
 
     kv::set_w(&p, "devA", "state", "n", json!(1)).unwrap();
     kv::set_w(&p, "devA", "state", "n", json!(2)).unwrap();

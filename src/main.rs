@@ -17,7 +17,10 @@
 //!   emlbox demo <path> [--big]
 //!   emlbox bench <dir>
 
-use emlbox::{bench, demo, fs, ipc, kv, mail, pack, reader, repair, rev, runner, site, sync, tagdb, verify, writer};
+use emlbox::{
+    bench, demo, fs, ipc, kv, mail, pack, reader, repair, rev, runner, site, sync, tagdb, verify,
+    writer,
+};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -133,7 +136,10 @@ fn cmd_mount(a: &[String]) -> i32 {
             }
             println!("deltas: {} (tail_seq={})", b.tail.entries.len(), b.tail_seq);
             for e in b.tail_entries() {
-                println!("  seq={} off={} len={} hash={:.12}", e.seq, e.off, e.len, e.hash);
+                println!(
+                    "  seq={} off={} len={} hash={:.12}",
+                    e.seq, e.off, e.len, e.hash
+                );
             }
             println!("base_hash: {}", b.base_hash);
             println!("tail_hash: {}", b.tail_hash);
@@ -149,7 +155,10 @@ fn cmd_get(a: &[String]) -> i32 {
         Err(e) => return err(&e),
     };
     let id = a.get(1).cloned().unwrap_or_default();
-    let out = a.iter().position(|x| x == "--out").map(|i| PathBuf::from(a[i + 1].clone()));
+    let out = a
+        .iter()
+        .position(|x| x == "--out")
+        .map(|i| PathBuf::from(a[i + 1].clone()));
     match reader::EmlBox::open(&path) {
         Ok(b) => match b.section(&id) {
             Some(data) => match out {
@@ -161,9 +170,9 @@ fn cmd_get(a: &[String]) -> i32 {
                     Err(e) => err(&e.to_string()),
                 },
                 None => {
-                    let printable = data
-                        .iter()
-                        .all(|b| *b == b'\n' || *b == b'\r' || *b == b'\t' || (*b >= 0x20 && *b != 0x7f));
+                    let printable = data.iter().all(|b| {
+                        *b == b'\n' || *b == b'\r' || *b == b'\t' || (*b >= 0x20 && *b != 0x7f)
+                    });
                     if printable {
                         print!("{}", String::from_utf8_lossy(&data));
                     } else {
@@ -188,17 +197,68 @@ fn cmd_kv(a: &[String]) -> i32 {
     match sub {
         "get" => {
             let key = a.get(3).cloned().unwrap_or_default();
+            // --at N: состояние ключа после первых N дельт таблицы (time travel)
+            let at = a
+                .iter()
+                .position(|x| x == "--at")
+                .and_then(|i| a.get(i + 1))
+                .map(|v| {
+                    v.parse::<usize>()
+                        .map_err(|_| format!("--at expects a number, got {v:?}"))
+                })
+                .transpose();
+            let at = match at {
+                Ok(v) => v,
+                Err(e) => return err(&e),
+            };
             match reader::EmlBox::open(&path) {
-                Ok(b) => match kv::get(&b, &table, &key) {
-                    Ok(v) => {
-                        println!("{}", v.map(|v| v.to_string()).unwrap_or_else(|| "<missing>".into()));
-                        0
+                Ok(b) => {
+                    let res = match at {
+                        Some(n) => kv::get_at(&b, &table, &key, n),
+                        None => kv::get(&b, &table, &key),
+                    };
+                    match res {
+                        Ok(v) => {
+                            println!(
+                                "{}",
+                                v.map(|v| v.to_string())
+                                    .unwrap_or_else(|| "<missing>".into())
+                            );
+                            0
+                        }
+                        Err(e) => err(&e),
                     }
-                    Err(e) => err(&e),
-                },
+                }
                 Err(e) => err(&e),
             }
         }
+        "history" => match reader::EmlBox::open(&path) {
+            Ok(b) => {
+                let key = a.get(3).map(|s| s.as_str());
+                match kv::history(&b, &table, key) {
+                    Ok(items) => {
+                        println!(
+                            "{:<18} {:>10} {:<4} {:<10} {:<12} value",
+                            "writer#seq", "ts", "seq", "op", "key"
+                        );
+                        for e in items {
+                            println!(
+                                "{:<18} {:>10} {:<4} {:<10} {:<12} {}",
+                                format!("{}#{}", e.writer, e.seq),
+                                e.ts,
+                                e.seq,
+                                e.op,
+                                e.key,
+                                e.value
+                            );
+                        }
+                        0
+                    }
+                    Err(e) => err(&e),
+                }
+            }
+            Err(e) => err(&e),
+        },
         "set" => {
             let key = a.get(3).cloned().unwrap_or_default();
             let val = a.get(4).cloned().unwrap_or_default();
@@ -250,15 +310,15 @@ fn cmd_kv(a: &[String]) -> i32 {
             Ok(b) => {
                 let key = a.get(3).cloned().unwrap_or_default();
                 match kv::list(&b, &table, &key) {
-                Ok(items) => {
-                    for it in &items {
-                        println!("{}", it);
+                    Ok(items) => {
+                        for it in &items {
+                            println!("{}", it);
+                        }
+                        0
                     }
-                    0
+                    Err(e) => err(&e),
                 }
-                Err(e) => err(&e),
-                }
-            },
+            }
             Err(e) => err(&e),
         },
         "del" => {
@@ -295,7 +355,13 @@ fn cmd_ipc(a: &[String]) -> i32 {
             };
             let to = a.get(2).cloned().unwrap_or_default();
             let event = a.get(3).cloned().unwrap_or_default();
-            let body: Value = a.get(4).map(|s| serde_json::from_str(s).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))).unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+            let body: Value = a
+                .get(4)
+                .map(|s| {
+                    serde_json::from_str(s)
+                        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
+                })
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
             match ipc::send(&bus, "view", &to, &event, &body) {
                 Ok(p) => {
                     println!("sent {}", p.display());
@@ -318,7 +384,10 @@ fn cmd_ipc(a: &[String]) -> i32 {
                         match ipc::parse(m) {
                             Ok(msg) => println!(
                                 "{}  {} -> {}  [{}]  {}",
-                                msg.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+                                msg.path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_default(),
                                 msg.from.trim_matches(|c| c == '<' || c == '>'),
                                 msg.to.trim_matches(|c| c == '<' || c == '>'),
                                 msg.event,
@@ -404,7 +473,10 @@ fn cmd_fs(a: &[String]) -> i32 {
                 Some(n) => n.clone(),
                 None => return err("mkdir: need directory name"),
             };
-            let query = a.iter().position(|x| x == "--query").map(|i| a[i + 1].clone());
+            let query = a
+                .iter()
+                .position(|x| x == "--query")
+                .map(|i| a[i + 1].clone());
             let contains: Vec<String> = {
                 let mut v = Vec::new();
                 let mut i = 3;
@@ -434,7 +506,10 @@ fn cmd_fs(a: &[String]) -> i32 {
                 None => return err("dir: need directory name"),
             };
             match fs::index(&store) {
-                Ok((recs, _)) => match recs.iter().find(|r| r.entity == format!("{name}@system.local")) {
+                Ok((recs, _)) => match recs
+                    .iter()
+                    .find(|r| r.entity == format!("{name}@system.local"))
+                {
                     Some(dir) => {
                         for r in fs::resolve(&recs, dir) {
                             println!("  {}  ({})", r.entity, r.eml_type);
@@ -550,8 +625,18 @@ fn cmd_tagdb(a: &[String]) -> i32 {
             }
         }
         "bench" => {
-            let n = a.iter().position(|x| x == "--n").and_then(|i| a.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(5000);
-            let body_kb = a.iter().position(|x| x == "--body-kb").and_then(|i| a.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(2);
+            let n = a
+                .iter()
+                .position(|x| x == "--n")
+                .and_then(|i| a.get(i + 1))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5000);
+            let body_kb = a
+                .iter()
+                .position(|x| x == "--body-kb")
+                .and_then(|i| a.get(i + 1))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(2);
             match tagdb::bench(&db, n, body_kb) {
                 Ok(out) => {
                     println!("{out}");
@@ -563,7 +648,6 @@ fn cmd_tagdb(a: &[String]) -> i32 {
         _ => err("tagdb subcommands: insert|query|bench"),
     }
 }
-
 
 /// Декомпиляция одной клетки: сигнатура из волны + поля + структурированный код.
 fn decomp_one(dir: &std::path::Path, func: &str) -> Option<String> {
@@ -582,7 +666,11 @@ fn decomp_one(dir: &std::path::Path, func: &str) -> Option<String> {
         if !types.is_empty() {
             types.sort();
             let args: Vec<String> = types.iter().map(|(n, t)| format!("{t} arg{n}")).collect();
-            out.push_str(&format!("// {}({})\n", func.split('@').next().unwrap_or(func), args.join(", ")));
+            out.push_str(&format!(
+                "// {}({})\n",
+                func.split('@').next().unwrap_or(func),
+                args.join(", ")
+            ));
         }
     }
     let mut code = rev::prettify(&rev::decompile_structured(&body));
@@ -605,7 +693,11 @@ fn decomp_one(dir: &std::path::Path, func: &str) -> Option<String> {
 
 fn cmd_rev(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
-    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    let flag = |name: &str| {
+        a.iter()
+            .position(|x| x == name)
+            .and_then(|i| a.get(i + 1).cloned())
+    };
     match sub {
         "type" => {
             // rev type <dir> <func> arg0 <Type>  — пометить тип (depth 0)
@@ -766,7 +858,15 @@ fn cmd_rev(a: &[String]) -> i32 {
                 Err(e) => return err(&e),
             };
             let func = flag("--func").unwrap_or_default();
-            let out = std::process::Command::new("objdump").args(["-d", "-M", "intel"]).arg(&binary).output().map_err(|e| e.to_string()).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
+            let out = std::process::Command::new("objdump")
+                .args(["-d", "-M", "intel"])
+                .arg(&binary)
+                .output()
+                .map_err(|e| e.to_string())
+                .unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                });
             let text = String::from_utf8_lossy(&out.stdout).to_string();
             let mut in_func = func.is_empty();
             let mut strings: Vec<String> = Vec::new();
@@ -841,8 +941,13 @@ fn cmd_rev(a: &[String]) -> i32 {
                         }
                         if !types.is_empty() {
                             types.sort();
-                            let args: Vec<String> = types.iter().map(|(n, t)| format!("{t} arg{n}")).collect();
-                            println!("// {}({})", func.split('@').next().unwrap_or(&func), args.join(", "));
+                            let args: Vec<String> =
+                                types.iter().map(|(n, t)| format!("{t} arg{n}")).collect();
+                            println!(
+                                "// {}({})",
+                                func.split('@').next().unwrap_or(&func),
+                                args.join(", ")
+                            );
                         }
                     }
                     if structured {
@@ -900,19 +1005,26 @@ fn cmd_rev(a: &[String]) -> i32 {
             };
             let filter = flag("--filter").unwrap_or_default();
             let mut files: Vec<String> = match std::fs::read_dir(&dir) {
-                Ok(rd) => rd.flatten().filter_map(|e| {
-                    let p = e.path();
-                    if p.extension().map(|x| x == "eml").unwrap_or(false) {
-                        p.file_stem().map(|s| s.to_string_lossy().to_string())
-                    } else { None }
-                }).collect(),
+                Ok(rd) => rd
+                    .flatten()
+                    .filter_map(|e| {
+                        let p = e.path();
+                        if p.extension().map(|x| x == "eml").unwrap_or(false) {
+                            p.file_stem().map(|s| s.to_string_lossy().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
                 Err(e) => return err(&format!("read_dir: {e}")),
             };
             files.sort();
             let mut out = String::new();
             let mut n = 0usize;
             for func in &files {
-                if !filter.is_empty() && !func.contains(&filter) { continue; }
+                if !filter.is_empty() && !func.contains(&filter) {
+                    continue;
+                }
                 if let Some(code) = decomp_one(&dir, func) {
                     out.push_str(&format!("\n// ===== {} =====\n", func));
                     out.push_str(&code);
@@ -967,56 +1079,71 @@ fn cmd_rev(a: &[String]) -> i32 {
                 Ok(p) => p,
                 Err(e) => return err(&e),
             };
-            let dir = a.get(2).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(format!("{}_cells", binary.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())));
+            let dir = a.get(2).map(PathBuf::from).unwrap_or_else(|| {
+                PathBuf::from(format!(
+                    "{}_cells",
+                    binary
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                ))
+            });
             if !dir.exists() {
                 match rev::analyze(&binary, &dir) {
                     Ok(n) => println!("нарезано функций: {n}"),
                     Err(e) => return err(&e),
                 }
             } else {
-                println!("функций (кэш): {}", std::fs::read_dir(&dir).map(|r| r.flatten().count()).unwrap_or(0));
+                println!(
+                    "функций (кэш): {}",
+                    std::fs::read_dir(&dir)
+                        .map(|r| r.flatten().count())
+                        .unwrap_or(0)
+                );
             }
             // vftables
-            match rev::vftables(&binary) {
-                Ok(cands) => {
-                    println!("vftable-кандидаты: {}", cands.len());
-                    for (off, n, _) in cands.iter().take(3) {
-                        println!("  {off:#x}: {n} указателей");
-                    }
+            if let Ok(cands) = rev::vftables(&binary) {
+                println!("vftable-кандидаты: {}", cands.len());
+                for (off, n, _) in cands.iter().take(3) {
+                    println!("  {off:#x}: {n} указателей");
                 }
-                Err(_) => {}
             }
             // recon
-            match rev::recon(&binary) {
-                Ok((strings, regions)) => {
-                    println!("строк (>=6): {}", strings.len());
-                    let comp = regions.iter().filter(|(_, _, _, c)| *c == "compressed").count();
-                    let plain = regions.iter().filter(|(_, _, _, c)| *c == "plain").count();
-                    println!("энтропия: {} регионов (code/plain/compressed = {}/{}/{})", regions.len(), regions.len() - comp - plain, plain, comp);
-                }
-                Err(_) => {}
+            if let Ok((strings, regions)) = rev::recon(&binary) {
+                println!("строк (>=6): {}", strings.len());
+                let comp = regions
+                    .iter()
+                    .filter(|(_, _, _, c)| *c == "compressed")
+                    .count();
+                let plain = regions.iter().filter(|(_, _, _, c)| *c == "plain").count();
+                println!(
+                    "энтропия: {} регионов (code/plain/compressed = {}/{}/{})",
+                    regions.len(),
+                    regions.len() - comp - plain,
+                    plain,
+                    comp
+                );
             }
             // топ-функции по числу каллеров
-            match rev::graph(&dir) {
-                Ok(g) => {
-                    let mut caller_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-                    for (_, callees) in &g {
-                        for c in callees {
-                            *caller_count.entry(c.clone()).or_default() += 1;
-                        }
-                    }
-                    let mut top: Vec<(String, usize)> = caller_count.into_iter().collect();
-                    top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-                    println!("\nсамые вызываемые:");
-                    for (name, n) in top.iter().take(8) {
-                        println!("  {n}x {name}");
+            if let Ok(g) = rev::graph(&dir) {
+                let mut caller_count: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                for (_, callees) in &g {
+                    for c in callees {
+                        *caller_count.entry(c.clone()).or_default() += 1;
                     }
                 }
-                Err(_) => {}
+                let mut top: Vec<(String, usize)> = caller_count.into_iter().collect();
+                top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+                println!("\nсамые вызываемые:");
+                for (name, n) in top.iter().take(8) {
+                    println!("  {n}x {name}");
+                }
             }
             // декомп примера: самая вызываемая функция
             if let Ok(g) = rev::graph(&dir) {
-                let mut caller_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                let mut caller_count: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for (_, callees) in &g {
                     for c in callees {
                         *caller_count.entry(c.clone()).or_default() += 1;
@@ -1025,7 +1152,10 @@ fn cmd_rev(a: &[String]) -> i32 {
                 if let Some((name, _)) = caller_count.into_iter().max_by_key(|(_, n)| *n) {
                     if let Some(body) = rev::body_of(&dir, &name) {
                         println!("\nпример декомпиляции: {name}");
-                        for line in rev::prettify(&rev::decompile_structured(&body)).lines().take(12) {
+                        for line in rev::prettify(&rev::decompile_structured(&body))
+                            .lines()
+                            .take(12)
+                        {
                             println!("  {line}");
                         }
                     }
@@ -1043,7 +1173,8 @@ fn cmd_rev(a: &[String]) -> i32 {
                 Ok(cands) => {
                     println!("vftable-кандидаты (указатели в .text, >= 3 подряд):");
                     for (off, n, ptrs) in cands.iter().take(10) {
-                        let first: Vec<String> = ptrs.iter().take(4).map(|p| format!("{p:#x}")).collect();
+                        let first: Vec<String> =
+                            ptrs.iter().take(4).map(|p| format!("{p:#x}")).collect();
                         println!("  vaddr {off:#x}: {n} указателей  [{}]", first.join(", "));
                     }
                     if cands.is_empty() {
@@ -1063,7 +1194,11 @@ fn cmd_rev(a: &[String]) -> i32 {
             let show_strings = a.iter().any(|x| x == "--strings");
             match rev::recon(&binary) {
                 Ok((strings, regions)) => {
-                    println!("строк (>=6): {}; регионы энтропии: {}", strings.len(), regions.len());
+                    println!(
+                        "строк (>=6): {}; регионы энтропии: {}",
+                        strings.len(),
+                        regions.len()
+                    );
                     for (s, e, h, class) in &regions {
                         println!("  [{class:10}] {s:#x}..{e:#x} entropy={h:.2}");
                     }
@@ -1130,7 +1265,11 @@ fn cmd_rev(a: &[String]) -> i32 {
 
 fn cmd_mail(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
-    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    let flag = |name: &str| {
+        a.iter()
+            .position(|x| x == name)
+            .and_then(|i| a.get(i + 1).cloned())
+    };
     match sub {
         "pack" => {
             // mail pack <container> --to addr [--writer W] [--since N] [--out file]
@@ -1209,14 +1348,22 @@ fn cmd_mail(a: &[String]) -> i32 {
                 Ok(p) => p,
                 Err(e) => return err(&e),
             };
-            let interval: u64 = flag("--interval").and_then(|s| s.parse().ok()).unwrap_or(10);
+            let interval: u64 = flag("--interval")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10);
             println!("mail watch: {maildir:?} -> {container:?}, interval {interval}s");
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(interval));
                 match mail::receive(&container, &maildir) {
                     Ok((applied, pending)) => {
                         if applied > 0 || pending > 0 {
-                            println!("  [{:?}] applied {applied}, pending {pending}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+                            println!(
+                                "  [{:?}] applied {applied}, pending {pending}",
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0)
+                            );
                         }
                     }
                     Err(e) => println!("  receive: {e}"),
@@ -1229,7 +1376,11 @@ fn cmd_mail(a: &[String]) -> i32 {
 
 fn cmd_sync(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
-    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    let flag = |name: &str| {
+        a.iter()
+            .position(|x| x == name)
+            .and_then(|i| a.get(i + 1).cloned())
+    };
     match sub {
         "export" => {
             let container = match path_arg(a, 1, "container") {
@@ -1259,12 +1410,17 @@ fn cmd_sync(a: &[String]) -> i32 {
                 Err(e) => return err(&e),
             };
             let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
-            let bus = flag("--bus").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/dev/shm/emlbox_bus"));
+            let bus = flag("--bus")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/dev/shm/emlbox_bus"));
             let to = flag("--to").unwrap_or_else(|| "*".to_string());
             let since: u64 = flag("--since").and_then(|s| s.parse().ok()).unwrap_or(0);
             match sync::push(&container, &writer, &bus, &to, since) {
                 Ok(n) => {
-                    println!("pushed {n} block(s) of writer {writer} to {}", bus.display());
+                    println!(
+                        "pushed {n} block(s) of writer {writer} to {}",
+                        bus.display()
+                    );
                     0
                 }
                 Err(e) => err(&e),
@@ -1275,7 +1431,9 @@ fn cmd_sync(a: &[String]) -> i32 {
                 Ok(p) => p,
                 Err(e) => return err(&e),
             };
-            let bus = flag("--bus").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/dev/shm/emlbox_bus"));
+            let bus = flag("--bus")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/dev/shm/emlbox_bus"));
             match sync::pull(&container, &bus) {
                 Ok((applied, pending)) => {
                     println!("applied {applied}, pending {pending}");
@@ -1339,7 +1497,9 @@ fn cmd_sync(a: &[String]) -> i32 {
             };
             let addr = flag("--addr").unwrap_or_else(|| "127.0.0.1:9001".to_string());
             let peers = flag("--peers").unwrap_or_default();
-            let interval: u64 = flag("--interval").and_then(|s| s.parse().ok()).unwrap_or(10);
+            let interval: u64 = flag("--interval")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10);
             // сервер в потоке
             let c = container.clone();
             let a = addr.clone();
@@ -1357,7 +1517,13 @@ fn cmd_sync(a: &[String]) -> i32 {
                     match sync::tcp_connect(&container, peer) {
                         Ok((r, s)) => {
                             if r > 0 || s > 0 {
-                                println!("  [{:?}] {peer}: received {r}, sent {s}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+                                println!(
+                                    "  [{:?}] {peer}: received {r}, sent {s}",
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_secs())
+                                        .unwrap_or(0)
+                                );
                             }
                         }
                         Err(e) => println!("  {peer}: {e}"),
@@ -1416,7 +1582,10 @@ fn cmd_mkdb(a: &[String]) -> i32 {
         Ok(p) => p,
         Err(e) => return err(&e),
     };
-    let entity = a.get(1).cloned().unwrap_or_else(|| "db_storage@system.local".to_string());
+    let entity = a
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "db_storage@system.local".to_string());
     match demo::build_db(&path, &entity) {
         Ok(()) => {
             println!("Database/KV built: {}", path.display());
@@ -1431,7 +1600,10 @@ fn cmd_mkmem(a: &[String]) -> i32 {
         Ok(p) => p,
         Err(e) => return err(&e),
     };
-    let entity = a.get(1).cloned().unwrap_or_else(|| "memory_agent_01@system.local".to_string());
+    let entity = a
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "memory_agent_01@system.local".to_string());
     match demo::build_mem(&path, &entity) {
         Ok(()) => {
             println!("AI/MemoryBank built: {}", path.display());
@@ -1560,7 +1732,11 @@ fn err(e: &str) -> i32 {
 
 fn cmd_site(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
-    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    let flag = |name: &str| {
+        a.iter()
+            .position(|x| x == name)
+            .and_then(|i| a.get(i + 1).cloned())
+    };
     match sub {
         "new" => {
             // site new <file.eml> --title T [--tags a,b] [--src body.md]
@@ -1570,7 +1746,12 @@ fn cmd_site(a: &[String]) -> i32 {
             };
             let title = flag("--title").unwrap_or_else(|| "Untitled".to_string());
             let tags: Vec<String> = flag("--tags")
-                .map(|t| t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .map(|t| {
+                    t.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default();
             let body = match flag("--src") {
                 Some(src) => match std::fs::read_to_string(&src) {
@@ -1640,7 +1821,10 @@ fn cmd_compact(a: &[String]) -> i32 {
         .unwrap_or_else(|| PathBuf::from(format!("{}.compacted.eml", src.display())));
     match emlbox::compact::compact(&src, &out) {
         Ok((sections, deltas)) => {
-            println!("compact: {deltas} дельт слито в {sections} секций -> {}", out.display());
+            println!(
+                "compact: {deltas} дельт слито в {sections} секций -> {}",
+                out.display()
+            );
             0
         }
         Err(e) => err(&e),
@@ -1654,7 +1838,10 @@ fn cmd_repair(a: &[String]) -> i32 {
     };
     match repair::repair(&path) {
         Ok((blocks, removed)) => {
-            println!("repair: восстановлено {blocks} блоков, отброшено {removed} байт -> {}", path.display());
+            println!(
+                "repair: восстановлено {blocks} блоков, отброшено {removed} байт -> {}",
+                path.display()
+            );
             0
         }
         Err(e) => err(&e),
@@ -1663,7 +1850,11 @@ fn cmd_repair(a: &[String]) -> i32 {
 
 fn cmd_doc(a: &[String]) -> i32 {
     let sub = a.first().map(|s| s.as_str()).unwrap_or("");
-    let flag = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned());
+    let flag = |name: &str| {
+        a.iter()
+            .position(|x| x == name)
+            .and_then(|i| a.get(i + 1).cloned())
+    };
     match sub {
         "init" => {
             // doc init <file> [entity]
@@ -1671,8 +1862,21 @@ fn cmd_doc(a: &[String]) -> i32 {
                 Ok(p) => p,
                 Err(e) => return err(&e),
             };
-            let entity = a.get(2).cloned().unwrap_or_else(|| "doc@system.local".to_string());
-            match writer::build_file(&file, &entity, "doc", vec![writer::Part::raw("doc", "application/json", "doc.json", br#"{"lines":[]}"#.to_vec())]) {
+            let entity = a
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "doc@system.local".to_string());
+            match writer::build_file(
+                &file,
+                &entity,
+                "doc",
+                vec![writer::Part::raw(
+                    "doc",
+                    "application/json",
+                    "doc.json",
+                    br#"{"lines":[]}"#.to_vec(),
+                )],
+            ) {
                 Ok(()) => {
                     println!("doc created: {}", file.display());
                     0
@@ -1689,7 +1893,14 @@ fn cmd_doc(a: &[String]) -> i32 {
             let text = a.get(2).cloned().unwrap_or_default();
             let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
             let after = flag("--after");
-            match kv::add(&file, &writer, "doc", "lines", serde_json::Value::String(text), after) {
+            match kv::add(
+                &file,
+                &writer,
+                "doc",
+                "lines",
+                serde_json::Value::String(text),
+                after,
+            ) {
                 Ok((seq, h)) => {
                     println!("doc line [{writer}] seq={seq} hash={h:.12}");
                     0
@@ -1718,7 +1929,10 @@ fn cmd_doc(a: &[String]) -> i32 {
                                     let v = e.get("v").and_then(|v| v.as_str()).unwrap_or("");
                                     println!("[{id}] {v}");
                                 } else {
-                                    println!("{}", e.get("v").and_then(|v| v.as_str()).unwrap_or(""));
+                                    println!(
+                                        "{}",
+                                        e.get("v").and_then(|v| v.as_str()).unwrap_or("")
+                                    );
                                 }
                             }
                             0
@@ -1731,7 +1945,7 @@ fn cmd_doc(a: &[String]) -> i32 {
         }
         "edit" => {
             // doc edit <file> [--writer W] — правка в $EDITOR, дельты автоматически
-            return cmd_doc_edit(a);
+            cmd_doc_edit(a)
         }
         "set" => {
             // doc set <file> <text> --id <id> [--writer W]
@@ -1742,7 +1956,14 @@ fn cmd_doc(a: &[String]) -> i32 {
             let text = a.get(2).cloned().unwrap_or_default();
             let id = flag("--id").unwrap_or_default();
             let writer = flag("--writer").unwrap_or_else(|| "local".to_string());
-            match kv::list_set(&file, &writer, "doc", "lines", &id, serde_json::Value::String(text)) {
+            match kv::list_set(
+                &file,
+                &writer,
+                "doc",
+                "lines",
+                &id,
+                serde_json::Value::String(text),
+            ) {
                 Ok((seq, h)) => {
                     println!("doc line [{writer}] set {id} seq={seq} hash={h:.12}");
                     0
@@ -1780,9 +2001,25 @@ fn cmd_doc(a: &[String]) -> i32 {
                             Err(_) => continue,
                         };
                         if let Ok(Some(d)) = emlbox::format::parse_delta_block(block) {
-                            let v = if d.value.is_string() { d.value.as_str().unwrap_or("").to_string() } else { d.value.to_string() };
-                            let v = if v.len() > 40 { format!("{}...", &v[..40]) } else { v };
-                            println!("{}.{}  {}  {}.{} = {}", e.writer, e.seq, ts_fmt(d.ts), d.table, d.key, v);
+                            let v = if d.value.is_string() {
+                                d.value.as_str().unwrap_or("").to_string()
+                            } else {
+                                d.value.to_string()
+                            };
+                            let v = if v.len() > 40 {
+                                format!("{}...", &v[..40])
+                            } else {
+                                v
+                            };
+                            println!(
+                                "{}.{}  {}  {}.{} = {}",
+                                e.writer,
+                                e.seq,
+                                ts_fmt(d.ts),
+                                d.table,
+                                d.key,
+                                v
+                            );
                         }
                     }
                     0
@@ -1847,19 +2084,40 @@ fn cmd_doc_edit(a: &[String]) -> i32 {
         Ok(t) => t,
         Err(e) => return err(&e),
     };
-    let arr = t.get("lines").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let arr = t
+        .get("lines")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let old: Vec<(String, String)> = arr
         .iter()
         .map(|e| {
             (
-                e.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string(),
-                e.get("v").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                e.get("id")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                e.get("v")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             )
         })
         .collect();
     // временный файл + редактор
-    let tmp = std::env::temp_dir().join(format!("emlbox_doc_{}_{}.txt", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
-    let mut content = old.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n");
+    let tmp = std::env::temp_dir().join(format!(
+        "emlbox_doc_{}_{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let mut content = old
+        .iter()
+        .map(|(_, t)| t.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     if !content.is_empty() {
         content.push('\n');
     }
@@ -1891,7 +2149,14 @@ fn cmd_doc_edit(a: &[String]) -> i32 {
                 } else {
                     after.clone()
                 };
-                let r = kv::add(&file, &writer, "doc", "lines", serde_json::Value::String(text.clone()), eff_after);
+                let r = kv::add(
+                    &file,
+                    &writer,
+                    "doc",
+                    "lines",
+                    serde_json::Value::String(text.clone()),
+                    eff_after,
+                );
                 if let Ok((seq, _)) = &r {
                     prev_add_id = Some(format!("{writer}#{seq}"));
                 }
@@ -1899,7 +2164,14 @@ fn cmd_doc_edit(a: &[String]) -> i32 {
             }
             emlbox::diff::LineOp::Set { id, text } => {
                 prev_add_id = None;
-                kv::list_set(&file, &writer, "doc", "lines", id, serde_json::Value::String(text.clone()))
+                kv::list_set(
+                    &file,
+                    &writer,
+                    "doc",
+                    "lines",
+                    id,
+                    serde_json::Value::String(text.clone()),
+                )
             }
             emlbox::diff::LineOp::Del { id } => {
                 prev_add_id = None;
@@ -1926,7 +2198,12 @@ fn cmd_setup_home(a: &[String]) -> i32 {
         .position(|x| x == "--dir")
         .and_then(|i| a.get(i + 1))
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("{}/.mime", std::env::var("HOME").unwrap_or_else(|_| ".".into()))));
+        .unwrap_or_else(|| {
+            PathBuf::from(format!(
+                "{}/.mime",
+                std::env::var("HOME").unwrap_or_else(|_| ".".into())
+            ))
+        });
     let install = a.iter().any(|x| x == "--install");
     match std::fs::create_dir_all(&dir) {
         Ok(()) => {}
@@ -1936,7 +2213,19 @@ fn cmd_setup_home(a: &[String]) -> i32 {
     // закладки
     let bm = dir.join("bookmarks.eml");
     if !bm.exists() {
-        if writer::build_file(&bm, "bm@home", "bookmarks", vec![writer::Part::raw("bms", "application/json", "bms.json", br#"{}"#.to_vec())]).is_err() {
+        if writer::build_file(
+            &bm,
+            "bm@home",
+            "bookmarks",
+            vec![writer::Part::raw(
+                "bms",
+                "application/json",
+                "bms.json",
+                br#"{}"#.to_vec(),
+            )],
+        )
+        .is_err()
+        {
             return err("create bookmarks failed");
         }
         println!("created {}", bm.display());
@@ -1944,20 +2233,38 @@ fn cmd_setup_home(a: &[String]) -> i32 {
     // заметки
     let nt = dir.join("notes.eml");
     if !nt.exists() {
-        if writer::build_file(&nt, "notes@home", "notes", vec![writer::Part::raw("doc", "application/json", "doc.json", br#"{"lines":[]}"#.to_vec())]).is_err() {
+        if writer::build_file(
+            &nt,
+            "notes@home",
+            "notes",
+            vec![writer::Part::raw(
+                "doc",
+                "application/json",
+                "doc.json",
+                br#"{"lines":[]}"#.to_vec(),
+            )],
+        )
+        .is_err()
+        {
             return err("create notes failed");
         }
         println!("created {}", nt.display());
     }
     // строки автозапуска (Hyprland exec-once)
-    let bm_s = format!("{e} sync daemon {} --addr 127.0.0.1:9601 --interval 15", bm.display());
+    let bm_s = format!(
+        "{e} sync daemon {} --addr 127.0.0.1:9601 --interval 15",
+        bm.display()
+    );
     let maildir = format!("{}/.mail", dir.display());
     let watch_s = format!("{e} mail watch {maildir} {} --interval 30", bm.display());
     println!("\nАвтозапуск (добавь в ~/.config/hypr/hyprland.conf):");
     println!("  exec-once = {bm_s}");
     println!("  exec-once = {watch_s}");
     if install {
-        let conf = format!("{}/.config/hypr/hyprland.conf", std::env::var("HOME").unwrap_or_else(|_| ".".into()));
+        let conf = format!(
+            "{}/.config/hypr/hyprland.conf",
+            std::env::var("HOME").unwrap_or_else(|_| ".".into())
+        );
         let text = match std::fs::read_to_string(&conf) {
             Ok(t) => t,
             Err(e) => return err(&format!("read {conf}: {e}")),
@@ -1972,7 +2279,9 @@ fn cmd_setup_home(a: &[String]) -> i32 {
             if !out.ends_with('\n') {
                 out.push('\n');
             }
-            out.push_str(&format!("# MIME-OS home mesh\n  exec-once = {bm_s}\n  exec-once = {watch_s}\n"));
+            out.push_str(&format!(
+                "# MIME-OS home mesh\n  exec-once = {bm_s}\n  exec-once = {watch_s}\n"
+            ));
             match std::fs::write(&conf, &out) {
                 Ok(()) => println!("hyprland.conf обновлён (демоны стартуют при входе)"),
                 Err(e) => return err(&format!("write {conf}: {e}")),
@@ -1981,6 +2290,10 @@ fn cmd_setup_home(a: &[String]) -> i32 {
             println!("hyprland.conf уже содержит демоны");
         }
     }
-    println!("\nДомашний mesh готов: {} + {} (демоны: sync daemon, mail watch)", bm.display(), nt.display());
+    println!(
+        "\nДомашний mesh готов: {} + {} (демоны: sync daemon, mail watch)",
+        bm.display(),
+        nt.display()
+    );
     0
 }

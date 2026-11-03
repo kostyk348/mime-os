@@ -12,7 +12,12 @@ use crate::writer::{build_file, Part};
 use std::path::{Component, Path, PathBuf};
 
 fn mime_for(p: &Path) -> &'static str {
-    match p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref() {
+    match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .as_deref()
+    {
         Some("json") => "application/json",
         Some("html") | Some("htm") => "text/html",
         Some("py") => "text/x-python",
@@ -40,7 +45,9 @@ fn collect(root: &Path, cur: &Path, parts: &mut Vec<Part>, total: &mut u64) -> R
                 .strip_prefix(root)
                 .map_err(|e| e.to_string())?
                 .to_string_lossy()
-                .to_string();
+                .replace('\\', "/");
+            // section ids are portable identifiers: always forward slashes,
+            // so a container packed on Windows unpacks byte-for-byte anywhere
             let data = std::fs::read(&p).map_err(|e| format!("read {}: {e}", p.display()))?;
             *total += data.len() as u64;
             parts.push(Part::raw(&rel, mime_for(&p), &rel, data));
@@ -69,7 +76,9 @@ pub fn unpack(container: &Path, out: &Path) -> Result<usize, String> {
     for s in &b.sections {
         let rel = PathBuf::from(&s.id);
         if rel.is_absolute()
-            || rel.components().any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+            || rel
+                .components()
+                .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
         {
             return Err(format!("unsafe path in container: {}", s.id));
         }

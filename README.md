@@ -52,7 +52,7 @@ hierarchy, an IPC bus made of `.eml` messages, one format for disk, memory and n
 | Layer | Commands | What it does |
 |---|---|---|
 | **Container** | `create`, `mount`, `get`, `verify` | single-file .eml: mmap reader, two-level index, append-only delta log with hash-chain |
-| **KV** | `kv get/set/del/dump` | NoSQL tables: base JSON + delta replay by seq |
+| **KV** | `kv get/set/del/dump`, `kv get --at N`, `kv history` | NoSQL tables: base JSON + delta replay by seq; **time travel** (`--at N` reconstructs state after the first N deltas) + audit log |
 | **Database/KV** (module 3) | `mkdb` | container-as-database: tables = MIME sections, byte-offset map |
 | **AI/MemoryBank** (module 4) | `mkmem` | agent memory: LTM attachments + turns as deltas |
 | **IPC bus** | `ipc send/list` | events are .eml messages in a spool directory |
@@ -220,8 +220,9 @@ is much larger than the headers.
 One query language for containers, FS and tagdb:
 
 ```
-field OP value [AND field OP value ...]
-OP: ==  !=  >=  <=  >  <
+expr := and (OR and)*          and := factor (AND factor)*
+factor := NOT factor | ( expr ) | field OP value
+OP: ==  !=  >=  <=  >  <       NOT > AND > OR (as in SQL/bash)
 field: a header name (X-Tag, X-Device-ID, X-Timestamp, X-EML-Type, ...)
 ```
 
@@ -230,6 +231,17 @@ field: a header name (X-Tag, X-Device-ID, X-Timestamp, X-EML-Type, ...)
 - `X-Tag != "telemetry"` — matches if **none** equals (also when the field is absent)
 - `Subject == "arcade"` — substring, case-insensitive
 - Missing field: `==` does not match, `!=` matches
+
+- **Parentheses and nesting (v0.17)**: `(X-Tag == "a" OR X-Tag == "b") AND NOT X-Timestamp < 100` — any depth, and quoted values survive keywords (`X-Note == "buy (milk) AND eggs"` is one clause)
+
+### Time travel over the delta log
+
+The append-only log makes history a first-class read: `kv get state hp --at 2`
+reconstructs the value after the first two deltas of the table (`--at 0` — the
+base section), and `kv history state [key]` prints the audit log — writer#seq,
+timestamp, operation, value — straight from the file. The same prefixes on
+every device: replay order is fixed by `(ts, writer)`, so time travel is
+deterministic even across writers.
 
 ---
 
@@ -289,7 +301,7 @@ cargo build --release
 > Fixed in this release cycle: the `emlbox` **binary** target and the `tests/sync.rs` suite
 > compile again (a `let`-binding for E0716 in the `rev strings` handler;
 > `Delta{id,after}` initializers updated). `cargo test` runs the full suite green
-> again — 69 tests. See [CHANGELOG.md](CHANGELOG.md) → v0.16.0.
+> again — 79 tests. See [CHANGELOG.md](CHANGELOG.md) → v0.16.0.
 
 Quickstart:
 
@@ -305,8 +317,9 @@ CLI reference:
 emlbox create <path> <entity> <subject> [--part id:ct:name:file ...]
 emlbox mount <path>
 emlbox get <path> <id> [--out file]
-emlbox kv get|set|del|dump <path> <table> [key] [json]
+emlbox kv get|set|del|dump <path> <table> [key] [json]  # get accepts --at N (time travel)
 emlbox ipc send|list <bus> [<to> <event> [json]]
+emlbox kv history <path> <table> [key]  # audit log: writer#seq, ts, op, value
 emlbox run <container> [--bus <dir>] [--once]
 emlbox sync export|push|pull|apply|heads <container> [--writer W] [--bus DIR] [--to ENTITY] [--since N]
 emlbox sync daemon <container> --addr :9001 --peers a,b [--interval 10]
@@ -395,7 +408,7 @@ until their predecessor arrives (`pull` loops until things stabilise).
 ## Tests
 
 ```bash
-cargo test            # the full suite: 69 tests, green
+cargo test            # the full suite: 79 tests, green
 ```
 
 The suite covers format invariants, IPC + Runner, FS, tagdb, pack, network sync and
@@ -410,6 +423,7 @@ in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | What | When |
 |---|---|---|
+| **v0.17.0** | All fronts: X-Query nesting (parens + precedence), KV time travel (`--at N`) + audit history, clippy zero-warnings, 3-OS CI with blocking fmt/clippy, release binaries | 2026-11-03 |
 | **v0.16.0** | Docs & promo: README rewritten (EN + RU), CHANGELOG / LIMITATIONS / CONTRIBUTING added — no code changes | 2026-10-30 |
 | **v0.15.0** | `rev decomp-all` — mass decompilation of a whole binary into one `.c`; `rev stats`. FTL: 288 ShipManager functions → 33k lines | 2026-09-13 |
 | v0.14.2 | GUI: Rev tab — decompile a rev cell with a button (with struct fields) | 2026-08-23 |
@@ -457,7 +471,7 @@ target currently needs a one-line fix to build.
 - ✅ X-Query OR / NOT (v0.7.1)
 - ⬜ Runner sandbox — seccomp / nsjail (logic currently runs as-is)
 - ⬜ Reindex after text edits; WAL against tear-writes
-- ⬜ X-Query nesting
+- ✅ X-Query nesting — parentheses + NOT/AND/OR precedence (v0.17)
 - ⬜ SMTP mesh / QUIC as the sync transport (the format stays the same)
 
 ## Contributing

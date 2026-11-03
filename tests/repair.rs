@@ -5,7 +5,6 @@ use emlbox::repair;
 use emlbox::verify;
 use emlbox::writer::{build_file, Part};
 use serde_json::json;
-use std::path::PathBuf;
 
 #[test]
 fn repair_recovers_after_tear_write() {
@@ -13,7 +12,18 @@ fn repair_recovers_after_tear_write() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let p = dir.join("db.eml");
-    build_file(&p, "db@system.local", "db", vec![Part::raw("state", "application/json", "state.json", br#"{"n":0}"#.to_vec())]).unwrap();
+    build_file(
+        &p,
+        "db@system.local",
+        "db",
+        vec![Part::raw(
+            "state",
+            "application/json",
+            "state.json",
+            br#"{"n":0}"#.to_vec(),
+        )],
+    )
+    .unwrap();
     for i in 1..=5 {
         kv::set(&p, "state", "n", json!(i)).unwrap();
     }
@@ -43,7 +53,10 @@ fn repair_recovers_after_tear_write() {
     // после: verify чистый, данные консистентны
     assert!(verify::verify(&crashed).unwrap().is_empty());
     let b = emlbox::reader::EmlBox::open(&crashed).unwrap();
-    let n = kv::get(&b, "state", "n").unwrap().and_then(|v| v.as_i64()).unwrap_or(0);
+    let n = kv::get(&b, "state", "n")
+        .unwrap()
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     assert!(n >= 4, "n={n}");
     let _ = last;
 }
@@ -54,7 +67,18 @@ fn truncate_rolls_back_deltas() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let p = dir.join("db.eml");
-    build_file(&p, "db@system.local", "db", vec![Part::raw("state", "application/json", "state.json", br#"{"n":0}"#.to_vec())]).unwrap();
+    build_file(
+        &p,
+        "db@system.local",
+        "db",
+        vec![Part::raw(
+            "state",
+            "application/json",
+            "state.json",
+            br#"{"n":0}"#.to_vec(),
+        )],
+    )
+    .unwrap();
     kv::set(&p, "state", "n", json!(1)).unwrap();
     kv::set(&p, "state", "n", json!(2)).unwrap();
     kv::set(&p, "state", "n", json!(3)).unwrap();

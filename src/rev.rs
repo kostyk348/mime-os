@@ -70,7 +70,10 @@ fn objdump_listing(binary: &Path) -> Result<String, String> {
     if plain.status.success() {
         return Ok(String::from_utf8_lossy(&plain.stdout).to_string());
     }
-    Err(format!("objdump failed: {}", String::from_utf8_lossy(&intel.stderr)))
+    Err(format!(
+        "objdump failed: {}",
+        String::from_utf8_lossy(&intel.stderr)
+    ))
 }
 
 /// Парсинг objdump -d -M intel листинга.
@@ -86,7 +89,12 @@ pub fn parse_listing(listing: &str) -> Vec<RevFunc> {
                 if let Some(f) = cur.take() {
                     funcs.push(f);
                 }
-                cur = Some(RevFunc { name, callees: Vec::new(), body: Vec::new(), call_sites: Vec::new() });
+                cur = Some(RevFunc {
+                    name,
+                    callees: Vec::new(),
+                    body: Vec::new(),
+                    call_sites: Vec::new(),
+                });
                 continue;
             }
         }
@@ -133,7 +141,9 @@ fn scan_mov_args(body: &[String]) -> Vec<(usize, String)> {
         }
         let dst = parts[0].split_whitespace().last().unwrap_or("");
         let src = parts[1].split_whitespace().next().unwrap_or("");
-        let arg = regs.iter().position(|r| *r == dst || format!("e{}", &r[1..]) == dst);
+        let arg = regs
+            .iter()
+            .position(|r| *r == dst || format!("e{}", &r[1..]) == dst);
         if let Some(a) = arg {
             if !out.iter().any(|(i, _)| *i == a) {
                 out.push((a, src.to_string()));
@@ -153,7 +163,9 @@ fn scan_mov_args(body: &[String]) -> Vec<(usize, String)> {
 }
 
 fn safe_name(name: &str) -> String {
-    name.chars().map(|c| if c == '/' || c == '\\' { '_' } else { c }).collect()
+    name.chars()
+        .map(|c| if c == '/' || c == '\\' { '_' } else { c })
+        .collect()
 }
 
 fn func_file(dir: &Path, name: &str) -> PathBuf {
@@ -161,7 +173,11 @@ fn func_file(dir: &Path, name: &str) -> PathBuf {
 }
 
 fn to_header(list: &[String]) -> String {
-    if list.is_empty() { "".into() } else { format!("X-Callees: {}\r\n", list.join(", ")) }
+    if list.is_empty() {
+        "".into()
+    } else {
+        format!("X-Callees: {}\r\n", list.join(", "))
+    }
 }
 
 fn site_to_header(sites: &[(String, Vec<(usize, String)>)]) -> String {
@@ -173,8 +189,11 @@ fn site_to_header(sites: &[(String, Vec<(usize, String)>)]) -> String {
     out
 }
 
+/// Клетка → список её call-site аргументов: callee -> [(arg, src)].
+pub type SiteMap = Vec<(String, Vec<(usize, String)>)>;
+
 /// Читать X-Call-Site заголовки клетки: callee -> [(arg, src)].
-fn site_map(dir: &Path, name: &str) -> Result<Vec<(String, Vec<(usize, String)>)>, String> {
+fn site_map(dir: &Path, name: &str) -> Result<SiteMap, String> {
     let p = func_file(dir, name);
     if !p.exists() {
         return Ok(Vec::new());
@@ -214,7 +233,7 @@ pub fn build(dir: &Path, listing: &str) -> Result<usize, String> {
     for f in &funcs {
         let refs = callers.get(&f.name).cloned().unwrap_or_default();
         let mut extra = String::new();
-        extra.push_str(&format!("X-EML-Type: Reverse/Binary-Function\r\n"));
+        extra.push_str("X-EML-Type: Reverse/Binary-Function\r\n");
         extra.push_str(&to_header(&f.callees));
         extra.push_str(&site_to_header(&f.call_sites));
         if !refs.is_empty() {
@@ -228,7 +247,12 @@ pub fn build(dir: &Path, listing: &str) -> Result<usize, String> {
             &entity,
             &f.name,
             &extra,
-            vec![Part::raw("listing", "text/x-asm", "listing.txt", body.into_bytes())],
+            vec![Part::raw(
+                "listing",
+                "text/x-asm",
+                "listing.txt",
+                body.into_bytes(),
+            )],
         )
         .map_err(|e| format!("{}: {e}", f.name))?;
     }
@@ -285,7 +309,9 @@ fn passing_param(dir: &Path, f: &str, callee: &str, arg_n: usize) -> Option<usiz
             }
             // передача "как есть": src == регистр-параметр той же позиции
             let src_clean = src.to_ascii_lowercase();
-            let src_clean = src_clean.trim_matches(|c: char| !c.is_ascii_alphanumeric()).to_string();
+            let src_clean = src_clean
+                .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+                .to_string();
             if Some(src_clean.as_str()) == param_reg(arg_n) {
                 return Some(arg_n);
             }
@@ -304,7 +330,12 @@ fn passing_param(dir: &Path, f: &str, callee: &str, arg_n: usize) -> Option<usiz
 pub fn body_of(dir: &Path, f: &str) -> Option<Vec<String>> {
     let b = EmlBox::open(&func_file(dir, f)).ok()?;
     let s = b.section("listing")?;
-    Some(String::from_utf8_lossy(&s).lines().map(|l| l.trim().to_string()).collect())
+    Some(
+        String::from_utf8_lossy(&s)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .collect(),
+    )
 }
 
 /// Пролог -O0: "mov QWORD PTR [rbp-0x8],rdi" — спасённый параметр.
@@ -343,15 +374,25 @@ fn rbp_slot(s: &str) -> Option<String> {
     if base.trim() != "rbp" {
         return None;
     }
-    Some(format!("{}{}", if inner.contains('-') { "-" } else { "+" }, off.trim().trim_start_matches("0x")))
+    Some(format!(
+        "{}{}",
+        if inner.contains('-') { "-" } else { "+" },
+        off.trim().trim_start_matches("0x")
+    ))
 }
 
 /// Resolve регистра к параметру вызывающей функции (i) через цепочки
 /// mov/lea назад по телу. [rbp-0x8] — слот пролога (спасённый параметр);
 /// [rbp+0x10] — аргумент SysV; [rbp-..] без слота — локаль; константа — None.
-fn resolve_param(body: &[String], src: &str, slots: &std::collections::HashMap<String, usize>) -> Option<usize> {
+fn resolve_param(
+    body: &[String],
+    src: &str,
+    slots: &std::collections::HashMap<String, usize>,
+) -> Option<usize> {
     let mut reg = src.to_ascii_lowercase();
-    reg = reg.trim_matches(|c: char| !c.is_ascii_alphanumeric()).to_string();
+    reg = reg
+        .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+        .to_string();
     let mut calls = 0usize;
     for line in body.iter().rev().take(12) {
         let l = line.to_ascii_lowercase();
@@ -378,7 +419,10 @@ fn resolve_param(body: &[String], src: &str, slots: &std::collections::HashMap<S
         if parts.len() != 2 {
             return None;
         }
-        let dst = parts[0].split_whitespace().last()?.trim_matches(|c: char| !c.is_ascii_alphanumeric());
+        let dst = parts[0]
+            .split_whitespace()
+            .last()?
+            .trim_matches(|c: char| !c.is_ascii_alphanumeric());
         if dst != reg {
             continue;
         }
@@ -398,11 +442,18 @@ fn resolve_param(body: &[String], src: &str, slots: &std::collections::HashMap<S
             return None; // локаль без слота
         }
         // константа
-        if s.starts_with("0x") || s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if s.starts_with("0x")
+            || s.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+        {
             return None;
         }
         // регистр: движемся дальше
-        reg = s.trim_matches(|c: char| !c.is_ascii_alphanumeric()).to_string();
+        reg = s
+            .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+            .to_string();
         continue;
     }
     None
@@ -411,10 +462,9 @@ fn resolve_param(body: &[String], src: &str, slots: &std::collections::HashMap<S
 /// [rbp+0x10] → 0, [rbp+0x18] → 1, ... (аргументы SysV после push rbp)
 fn stack_param_offset(s: &str) -> Option<usize> {
     let s = s.trim();
-    let inner = if let Some(i) = s.strip_prefix('[') {
+    let inner = {
+        let i = s.strip_prefix('[')?;
         i.strip_suffix(']')?
-    } else {
-        return None;
     };
     let (base, off) = inner.split_once('+')?;
     if base.trim() != "rbp" {
@@ -432,7 +482,13 @@ fn stack_param_offset(s: &str) -> Option<usize> {
 /// тактов. Точная волна: вызывающая функция типизируется только если реально
 /// передаёт свой параметр в помеченный аргумент (call-site анализ).
 /// depth=0 — только сама функция. Возвращает "func (argN)" — достигнутые.
-pub fn type_mark(dir: &Path, func: &str, arg: &str, ty: &str, max_depth: usize) -> Result<Vec<String>, String> {
+pub fn type_mark(
+    dir: &Path,
+    func: &str,
+    arg: &str,
+    ty: &str,
+    max_depth: usize,
+) -> Result<Vec<String>, String> {
     let arg_idx: usize = arg.trim_start_matches("arg").parse().unwrap_or(0);
     let mut seen: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<(String, usize, usize)> = VecDeque::new(); // (name, marked_arg, depth)
@@ -447,18 +503,23 @@ pub fn type_mark(dir: &Path, func: &str, arg: &str, ty: &str, max_depth: usize) 
         if !p.exists() {
             continue;
         }
-        let b = EmlBox::open(&p)?;
-        let mut types: Vec<(String, String)> = Vec::new();
-        for (k, v) in &b.headers {
-            let k = k.to_string();
-            if k.starts_with("X-Type-") {
-                types.push((k, v.clone()));
+        // the mmap view is closed at the end of this block — rewriting the
+        // same file while it is mapped fails on Windows (os error 1224)
+        let types: Vec<(String, String)> = {
+            let b = EmlBox::open(&p)?;
+            let mut types: Vec<(String, String)> = Vec::new();
+            for (k, v) in &b.headers {
+                let k = k.to_string();
+                if k.starts_with("X-Type-") {
+                    types.push((k, v.clone()));
+                }
             }
-        }
-        let tkey = format!("X-Type-arg{marked_arg}");
-        if !types.iter().any(|(k, _)| k == &tkey) {
-            types.push((tkey.clone(), ty.to_string()));
-        }
+            let tkey = format!("X-Type-arg{marked_arg}");
+            if !types.iter().any(|(k, _)| k == &tkey) {
+                types.push((tkey.clone(), ty.to_string()));
+            }
+            types
+        };
         reached.push(format!("{name} (arg{marked_arg})"));
         rewrite(dir, &name, &types)?;
         // распространить вверх: кто вызывает name и реально передаёт параметр
@@ -476,17 +537,20 @@ pub fn type_mark(dir: &Path, func: &str, arg: &str, ty: &str, max_depth: usize) 
 
 fn rewrite(dir: &Path, name: &str, types: &[(String, String)]) -> Result<(), String> {
     let p = func_file(dir, name);
-    let b = EmlBox::open(&p)?;
-    let listing = b
-        .section("listing")
-        .ok_or("no listing section")?;
-    let callees: Vec<String> = b
-        .headers
-        .iter()
-        .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
-        .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
-        .collect();
-    let refs: Vec<String> = callers(dir, name)?;
+    // read everything under the mmap, then close it before rewriting the file
+    // (Windows: writing a user-mapped section fails with os error 1224)
+    let (listing, callees, refs) = {
+        let b = EmlBox::open(&p)?;
+        let listing = b.section("listing").ok_or("no listing section")?.to_vec();
+        let callees: Vec<String> = b
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+            .collect();
+        let refs = callers(dir, name)?;
+        (listing, callees, refs)
+    };
     let mut extra = String::new();
     extra.push_str("X-EML-Type: Reverse/Binary-Function\r\n");
     extra.push_str(&to_header(&callees));
@@ -502,7 +566,7 @@ fn rewrite(dir: &Path, name: &str, types: &[(String, String)]) -> Result<(), Str
         &entity,
         name,
         &extra,
-        vec![Part::raw("listing", "text/x-asm", "listing.txt", listing.to_vec())],
+        vec![Part::raw("listing", "text/x-asm", "listing.txt", listing)],
     )
     .map_err(|e| format!("rewrite {name}: {e}"))
 }
@@ -518,11 +582,16 @@ pub fn cluster(dir: &Path, pattern: &str) -> Result<Vec<String>, String> {
             continue;
         }
         let b = EmlBox::open(&p)?;
-        let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let name = p
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
         let hay = format!(
             "{} {}",
             name,
-            b.section("listing").map(|s| String::from_utf8_lossy(&s).to_string()).unwrap_or_default()
+            b.section("listing")
+                .map(|s| String::from_utf8_lossy(&s).to_string())
+                .unwrap_or_default()
         )
         .to_ascii_lowercase();
         if hay.contains(&pat) {
@@ -543,7 +612,10 @@ pub fn graph(dir: &Path) -> Result<Vec<(String, Vec<String>)>, String> {
             continue;
         }
         let b = EmlBox::open(&p)?;
-        let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let name = p
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
         let callees: Vec<String> = b
             .headers
             .iter()
@@ -566,7 +638,10 @@ pub fn type_map(dir: &Path) -> Result<Vec<(String, Vec<String>)>, String> {
             continue;
         }
         let b = EmlBox::open(&p)?;
-        let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let name = p
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
         let types: Vec<String> = b
             .headers
             .iter()
@@ -680,18 +755,27 @@ fn replace_rip(m: &str) -> String {
 pub fn body_hash(dir: &Path, name: &str) -> Result<String, String> {
     let b = EmlBox::open(&func_file(dir, name))?;
     let body = b.section("listing").ok_or("no listing")?;
-    Ok(hash_bytes(normalize_body(&String::from_utf8_lossy(&body)).as_bytes()))
+    Ok(hash_bytes(
+        normalize_body(&String::from_utf8_lossy(&body)).as_bytes(),
+    ))
 }
 
 /// Диффинг версий: какие функции изменились / добавились / удалились.
-pub fn diff(dir_a: &Path, dir_b: &Path) -> Result<(Vec<String>, Vec<String>, Vec<String>), String> {
+/// (changed, added, removed) между двумя версиями клетки-графа.
+pub type RevDiff = (Vec<String>, Vec<String>, Vec<String>);
+
+pub fn diff(dir_a: &Path, dir_b: &Path) -> Result<RevDiff, String> {
     let names = |dir: &Path| -> Result<Vec<String>, String> {
         let rd = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().map(|x| x == "eml").unwrap_or(false) {
-                out.push(p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default());
+                out.push(
+                    p.file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                );
             }
         }
         out.sort();
@@ -755,12 +839,22 @@ mod tests {
 
         // net_send.arg1 (data) ← player_take_damage передаёт свой arg0 (slot -8)
         let hit = type_mark(&dir, "net_send", "arg1", "void*", 5).unwrap();
-        assert_eq!(hit, vec!["net_send (arg1)".to_string(), "player_take_damage (arg0)".to_string()]);
+        assert_eq!(
+            hit,
+            vec![
+                "net_send (arg1)".to_string(),
+                "player_take_damage (arg0)".to_string()
+            ]
+        );
         // main передаёт ЛОКАЛЬ ([rbp-0x20]), не параметр → НЕ типизируется
         let tm = type_map(&dir).unwrap();
         assert_eq!(tm.len(), 2);
         for (name, types) in &tm {
-            assert!(types.contains(&"X-Type-arg1=void*".to_string()) || types.contains(&"X-Type-arg0=void*".to_string()), "{name}: {types:?}");
+            assert!(
+                types.contains(&"X-Type-arg1=void*".to_string())
+                    || types.contains(&"X-Type-arg0=void*".to_string()),
+                "{name}: {types:?}"
+            );
         }
     }
 }
@@ -770,8 +864,12 @@ mod norm_tests {
     use super::*;
     #[test]
     fn normalize_rips_and_targets() {
-        let a = normalize_body("1058:\t48 8d 3d 34 02 00 00 \tlea    rdi,[rip+0x234]        # 1293 <main>");
-        let b = normalize_body("1058:\t48 8d 3d 44 02 00 00 \tlea    rdi,[rip+0x244]        # 12a3 <main>");
+        let a = normalize_body(
+            "1058:\t48 8d 3d 34 02 00 00 \tlea    rdi,[rip+0x234]        # 1293 <main>",
+        );
+        let b = normalize_body(
+            "1058:\t48 8d 3d 44 02 00 00 \tlea    rdi,[rip+0x244]        # 12a3 <main>",
+        );
         eprintln!("A: [{a}]");
         eprintln!("B: [{b}]");
         assert_eq!(a, b);
@@ -830,9 +928,19 @@ pub fn branch(dir: &Path, func: &str, branch_name: &str, depth: usize) -> Result
             .collect();
         let linked: Vec<String> = callees
             .iter()
-            .map(|c| if seen.contains(c) { format!("{c}@{branch_name}") } else { c.clone() })
+            .map(|c| {
+                if seen.contains(c) {
+                    format!("{c}@{branch_name}")
+                } else {
+                    c.clone()
+                }
+            })
             .collect();
-        let root_hdr = if *n == *func { "X-Branch-Root: 1\r\n" } else { "" };
+        let root_hdr = if *n == *func {
+            "X-Branch-Root: 1\r\n"
+        } else {
+            ""
+        };
         let cs = call_site_hdr(&b, &seen, branch_name);
         let extra = format!(
             "X-EML-Type: Reverse/Binary-Function\r\nX-Callees: {}\r\n{cs}In-Reply-To: {n}\r\nX-Branch: {branch_name}\r\n{root_hdr}",
@@ -844,7 +952,12 @@ pub fn branch(dir: &Path, func: &str, branch_name: &str, depth: usize) -> Result
             &entity,
             &format!("{n}@{branch_name}"),
             &extra,
-            vec![Part::raw("listing", "text/x-asm", "listing.txt", listing.to_vec())],
+            vec![Part::raw(
+                "listing",
+                "text/x-asm",
+                "listing.txt",
+                listing.to_vec(),
+            )],
         )
         .map_err(|e| format!("branch {n}: {e}"))?;
     }
@@ -867,17 +980,25 @@ pub fn branch(dir: &Path, func: &str, branch_name: &str, depth: usize) -> Result
         if refs.is_empty() {
             continue;
         }
-        // дописать References в клетку (пересоздать)
-        let b = EmlBox::open(&func_file(dir, &bn))?;
-        let listing = b.section("listing").ok_or("no listing")?;
-        let callees: Vec<String> = b
-            .headers
-            .iter()
-            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
-            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
-            .collect();
-        let root_hdr = if *n == *func { "X-Branch-Root: 1\r\n" } else { "" };
-        let cs = call_site_hdr(&b, &seen, branch_name);
+        // дописать References в клетку (пересоздать); mmap закрывается до
+        // перезаписи файла — иначе на Windows os error 1224
+        let (listing, callees, cs) = {
+            let b = EmlBox::open(&func_file(dir, &bn))?;
+            let listing = b.section("listing").ok_or("no listing")?.to_vec();
+            let callees: Vec<String> = b
+                .headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+                .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+                .collect();
+            let cs = call_site_hdr(&b, &seen, branch_name);
+            (listing, callees, cs)
+        };
+        let root_hdr = if *n == *func {
+            "X-Branch-Root: 1\r\n"
+        } else {
+            ""
+        };
         let extra = format!(
             "X-EML-Type: Reverse/Binary-Function\r\nX-Callees: {}\r\nReferences: {}\r\n{cs}In-Reply-To: {n}\r\nX-Branch: {branch_name}\r\n{root_hdr}",
             callees.join(", "),
@@ -888,7 +1009,7 @@ pub fn branch(dir: &Path, func: &str, branch_name: &str, depth: usize) -> Result
             &format!("{}@{branch_name}@{}", safe_name(n), BINARY),
             &bn,
             &extra,
-            vec![Part::raw("listing", "text/x-asm", "listing.txt", listing.to_vec())],
+            vec![Part::raw("listing", "text/x-asm", "listing.txt", listing)],
         )
         .map_err(|e| format!("refs {bn}: {e}"))?;
     }
@@ -907,7 +1028,10 @@ pub fn branches(dir: &Path) -> Result<Vec<(String, String, usize)>, String> {
         }
         let b = EmlBox::open(&p)?;
         if let Some(br) = b.header("X-Branch") {
-            let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let name = p
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
             map.entry(br.to_string()).or_default().push(name);
         }
     }
@@ -921,7 +1045,9 @@ pub fn branches(dir: &Path) -> Result<Vec<(String, String, usize)>, String> {
                 continue;
             }
             if let Ok(b) = EmlBox::open(&p) {
-                if b.header("X-Branch").map(|x| x == br.as_str()).unwrap_or(false)
+                if b.header("X-Branch")
+                    .map(|x| x == br.as_str())
+                    .unwrap_or(false)
                     && b.header("X-Branch-Root").is_some()
                 {
                     if let Some(nm) = p.file_stem().map(|x| x.to_string_lossy().to_string()) {
@@ -942,7 +1068,10 @@ pub fn branch_rm(dir: &Path, branch_name: &str) -> Result<usize, String> {
     let rd = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
     for e in rd.flatten() {
         let p = e.path();
-        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         if name.ends_with(&format!("@{branch_name}.eml")) {
             let _ = std::fs::remove_file(&p);
             removed += 1;
@@ -953,7 +1082,10 @@ pub fn branch_rm(dir: &Path, branch_name: &str) -> Result<usize, String> {
 
 /// Разведка бинарника до дизассемблирования: строки и энтропийные регионы.
 /// Returns (строки: Vec<(off, len, text)>, регионы: Vec<(start, end, entropy, class)>).
-pub fn recon(binary: &Path) -> Result<(Vec<(u64, u64, String)>, Vec<(u64, u64, f64, &'static str)>), String> {
+/// (строки: Vec<(off, len, text)>, регионы: Vec<(start, end, entropy, class)>).
+pub type Recon = (Vec<(u64, u64, String)>, Vec<(u64, u64, f64, &'static str)>);
+
+pub fn recon(binary: &Path) -> Result<Recon, String> {
     let data = std::fs::read(binary).map_err(|e| e.to_string())?;
     // строки (printable >= 6)
     let mut strings = Vec::new();
@@ -963,13 +1095,21 @@ pub fn recon(binary: &Path) -> Result<(Vec<(u64, u64, String)>, Vec<(u64, u64, f
         let printable = (0x20..=0x7e).contains(&c);
         if !printable {
             if i - start >= 6 {
-                strings.push((start as u64, (i - start) as u64, String::from_utf8_lossy(&data[start..i]).to_string()));
+                strings.push((
+                    start as u64,
+                    (i - start) as u64,
+                    String::from_utf8_lossy(&data[start..i]).to_string(),
+                ));
             }
             start = i + 1;
         }
     }
     if data.len() - start >= 6 {
-        strings.push((start as u64, (data.len() - start) as u64, String::from_utf8_lossy(&data[start..]).to_string()));
+        strings.push((
+            start as u64,
+            (data.len() - start) as u64,
+            String::from_utf8_lossy(&data[start..]).to_string(),
+        ));
     }
     // энтропия по блокам 4096
     const BLOCK: usize = 4096;
@@ -990,7 +1130,13 @@ pub fn recon(binary: &Path) -> Result<(Vec<(u64, u64, String)>, Vec<(u64, u64, f
                 h -= p * p.log2();
             }
         }
-        let class = if h < 4.5 { "plain" } else if h < 7.5 { "code" } else { "compressed" };
+        let class = if h < 4.5 {
+            "plain"
+        } else if h < 7.5 {
+            "code"
+        } else {
+            "compressed"
+        };
         if let Some(last) = regions.last_mut() {
             if last.3 == class {
                 last.1 = end as u64;
@@ -1027,13 +1173,17 @@ pub fn vftables(binary: &Path) -> Result<Vec<(u64, usize, Vec<u64>)>, String> {
         let vaddr = u64::from_str_radix(f[3], 16).ok();
         let off = u64::from_str_radix(f[5], 16).ok();
         let size = u64::from_str_radix(f[4], 16).ok();
-        let (Some(vaddr), Some(off), Some(size)) = (vaddr, off, size) else { continue };
+        let (Some(vaddr), Some(off), Some(size)) = (vaddr, off, size) else {
+            continue;
+        };
         if name.starts_with(".text") || name.starts_with(".init") || name.starts_with(".fini") {
             text_ranges.push((vaddr, off, size));
-        } else if name.starts_with(".rodata") || name.starts_with(".data.rel.ro") || name.starts_with(".data") {
-            if name != ".data" || size > 0 {
-                data_secs.push((vaddr, off, size));
-            }
+        } else if (name.starts_with(".rodata")
+            || name.starts_with(".data.rel.ro")
+            || name.starts_with(".data"))
+            && (name != ".data" || size > 0)
+        {
+            data_secs.push((vaddr, off, size));
         }
     }
     let data = std::fs::read(binary).map_err(|e| e.to_string())?;
@@ -1048,7 +1198,7 @@ pub fn vftables(binary: &Path) -> Result<Vec<(u64, usize, Vec<u64>)>, String> {
             let ptr = u64::from_le_bytes(data[i..i + 8].try_into().unwrap());
             let in_text = text_ranges.iter().any(|(tv, to, ts)| {
                 let file = ptr.checked_sub(*tv).map(|d| *to + d);
-                file.map(|f| f + 1 <= *to + *ts).unwrap_or(false)
+                file.map(|f| f < *to + *ts).unwrap_or(false)
             });
             if in_text {
                 if run.is_empty() {
@@ -1116,7 +1266,12 @@ fn translate(m: &str) -> String {
         "cmp" => format!("/* cmp {args} */"),
         "test" => format!("/* test {args} */"),
         "call" => {
-            let name = args.trim_start_matches("0x").split_whitespace().last().unwrap_or("?").trim_matches(['<', '>']);
+            let name = args
+                .trim_start_matches("0x")
+                .split_whitespace()
+                .last()
+                .unwrap_or("?")
+                .trim_matches(['<', '>']);
             format!("{name}(...);")
         }
         "jmp" => format!("goto {addr};", addr = target(&args)),
@@ -1152,7 +1307,11 @@ fn dst_of(a: &str) -> String {
     if let Some(b) = a.rfind('[') {
         return format!("*[{}]", mem(&a[b..]));
     }
-    a.split_whitespace().next().unwrap_or("").trim_matches(',').to_string()
+    a.split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches(',')
+        .to_string()
 }
 
 /// Правая часть: значение или "*память" (ищет [..] в любом месте).
@@ -1181,11 +1340,18 @@ fn arith(args: &str, op: &str) -> String {
 
 fn mem(s: &str) -> String {
     // [rbp-8] -> (rbp-8), [rax+0x10] -> (rax+0x10)
-    s.trim().trim_start_matches('[').trim_end_matches(']').to_string()
+    s.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string()
 }
 
 fn reg_of(s: &str) -> String {
-    s.split_whitespace().next().unwrap_or("").trim_matches(',').to_string()
+    s.split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches(',')
+        .to_string()
 }
 
 fn target(args: &str) -> String {
@@ -1230,10 +1396,20 @@ pub fn decompile_structured(body: &[String]) -> String {
             if let Some(b) = cur.take() {
                 blocks.push(b);
             }
-            cur = Some(Block { label: Some(format!("L{:x}", i.addr)), insns: Vec::new(), term: "fall".into(), last_test: None });
+            cur = Some(Block {
+                label: Some(format!("L{:x}", i.addr)),
+                insns: Vec::new(),
+                term: "fall".into(),
+                last_test: None,
+            });
         }
         if cur.is_none() {
-            cur = Some(Block { label: None, insns: Vec::new(), term: "fall".into(), last_test: None });
+            cur = Some(Block {
+                label: None,
+                insns: Vec::new(),
+                term: "fall".into(),
+                last_test: None,
+            });
         }
         let b = cur.as_mut().unwrap();
         match i.mnem.as_str() {
@@ -1251,7 +1427,8 @@ pub fn decompile_structured(body: &[String]) -> String {
                 }
                 continue;
             }
-            "je" | "jz" | "jne" | "jnz" | "jg" | "jge" | "jl" | "jle" | "ja" | "jb" | "jae" | "jbe" | "js" | "jns" => {
+            "je" | "jz" | "jne" | "jnz" | "jg" | "jge" | "jl" | "jle" | "ja" | "jb" | "jae"
+            | "jbe" | "js" | "jns" => {
                 let cond = build_cond(&i.mnem, &b.last_test);
                 b.term = format!("jcc|{cond}|{tgt}", tgt = target_label(&i.args, func_start));
                 if let Some(fin) = cur.take() {
@@ -1267,9 +1444,18 @@ pub fn decompile_structured(body: &[String]) -> String {
                 b.insns.push(format!("/* {} {} */", i.mnem, i.args));
             }
             "call" => {
-                let name = i.args.trim_start_matches("0x").split_whitespace().last().unwrap_or("?").trim_matches(['<', '>']);
+                let name = i
+                    .args
+                    .trim_start_matches("0x")
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("?")
+                    .trim_matches(['<', '>']);
                 // std::string-операции — мусор для чтения
-                if name.starts_with("_ZNSs") || name.starts_with("_ZNSt6") || name.starts_with("_ZNKSs") {
+                if name.starts_with("_ZNSs")
+                    || name.starts_with("_ZNSt6")
+                    || name.starts_with("_ZNKSs")
+                {
                     b.insns.push("// (std::string op)".to_string());
                     if let Some(fin) = cur.take() {
                         blocks.push(fin);
@@ -1320,7 +1506,10 @@ pub fn decompile_structured(body: &[String]) -> String {
             let mut parts = rest.splitn(2, '|');
             let cond = parts.next().unwrap_or("").to_string();
             let target = parts.next().unwrap_or("").to_string();
-            if let Some(li) = blocks.iter().position(|x| x.label.as_deref() == Some(&target)) {
+            if let Some(li) = blocks
+                .iter()
+                .position(|x| x.label.as_deref() == Some(&target))
+            {
                 if li <= bi {
                     loops.push((bi, li, cond));
                 }
@@ -1349,8 +1538,23 @@ pub fn decompile_structured(body: &[String]) -> String {
             }
         }
         // сами входные регистры (для выражений/условий)
-        for (reg, n) in [("rdi", 0usize), ("esi", 1), ("edx", 2), ("ecx", 3), ("r8d", 4), ("r9d", 5), ("edi", 0), ("rsi", 1), ("rdx", 2), ("rcx", 3), ("r8", 4), ("r9", 5)] {
-            param_map.entry(reg.to_string()).or_insert_with(|| format!("arg{n}"));
+        for (reg, n) in [
+            ("rdi", 0usize),
+            ("esi", 1),
+            ("edx", 2),
+            ("ecx", 3),
+            ("r8d", 4),
+            ("r9d", 5),
+            ("edi", 0),
+            ("rsi", 1),
+            ("rdx", 2),
+            ("rcx", 3),
+            ("r8", 4),
+            ("r9", 5),
+        ] {
+            param_map
+                .entry(reg.to_string())
+                .or_insert_with(|| format!("arg{n}"));
         }
     }
     // структурирование
@@ -1373,8 +1577,8 @@ pub fn decompile_structured(body: &[String]) -> String {
         if let Some((_, ls, cond)) = loops.iter().find(|(c, _, _)| *c == i) {
             let mut body = String::new();
             if *ls < i {
-                for j in *ls..i {
-                    body.push_str(&block_body(&blocks[j], 4));
+                for (j, block) in blocks.iter().enumerate().take(i).skip(*ls) {
+                    body.push_str(&block_body(block, 4));
                     emitted.insert(j);
                 }
             } else {
@@ -1392,13 +1596,17 @@ pub fn decompile_structured(body: &[String]) -> String {
             let cond = &parts[1];
             let target = parts[2];
             // найти блок с target-меткой
-            let t_idx = blocks.iter().position(|x| x.label.as_deref() == Some(target));
+            let t_idx = blocks
+                .iter()
+                .position(|x| x.label.as_deref() == Some(target));
             // while: target вперёд, а блок перед ним — jmp назад к заголовку (этому блоку)
             let mut is_while = false;
             if let Some(k) = t_idx {
                 if k > i + 1 {
                     if let Some(prev) = blocks.get(k - 1) {
-                        if prev.term.starts_with("jmp|") && b.label.as_deref() == Some(&prev.term[4..]) {
+                        if prev.term.starts_with("jmp|")
+                            && b.label.as_deref() == Some(&prev.term[4..])
+                        {
                             is_while = true;
                         }
                     }
@@ -1407,9 +1615,9 @@ pub fn decompile_structured(body: &[String]) -> String {
             if is_while {
                 let k = t_idx.unwrap();
                 let mut body = String::new();
-                for j in (i + 1)..k {
+                for (j, block) in blocks.iter().enumerate().take(k).skip(i + 1) {
                     if !emitted.contains(&j) {
-                        body.push_str(&block_body(&blocks[j], 4));
+                        body.push_str(&block_body(block, 4));
                         emitted.insert(j);
                     }
                 }
@@ -1422,7 +1630,12 @@ pub fn decompile_structured(body: &[String]) -> String {
             // else: блок после then, если он jmp к join
             // код ДО if — снаружи
             for insn in &b.insns {
-                if insn.starts_with("push ") || insn.starts_with("pop ") || insn.starts_with("rsp -= 0x") || insn == "rbp = rsp;" || insn == "leave;" {
+                if insn.starts_with("push ")
+                    || insn.starts_with("pop ")
+                    || insn.starts_with("rsp -= 0x")
+                    || insn == "rbp = rsp;"
+                    || insn == "leave;"
+                {
                     continue;
                 }
                 out.push_str(&format!("{insn}\n"));
@@ -1437,7 +1650,7 @@ pub fn decompile_structured(body: &[String]) -> String {
                 let else_body = block_body(&blocks[ti], 4);
                 if ti != then_idx && !emitted.contains(&ti) && !else_body.trim().is_empty() {
                     // else-ветка
-                    body.push_str(&format!("}} else {{\n"));
+                    body.push_str("} else {\n");
                     body.push_str(&else_body);
                     emitted.insert(ti);
                     body.push_str("}\n");
@@ -1452,20 +1665,32 @@ pub fn decompile_structured(body: &[String]) -> String {
         } else if b.term.starts_with("jmp|") {
             let target = b.term[4..].to_string();
             for insn in &b.insns {
-                if insn.starts_with("push ") || insn.starts_with("pop ") || insn.starts_with("rsp -= 0x") || insn == "rbp = rsp;" || insn == "leave;" {
+                if insn.starts_with("push ")
+                    || insn.starts_with("pop ")
+                    || insn.starts_with("rsp -= 0x")
+                    || insn == "rbp = rsp;"
+                    || insn == "leave;"
+                {
                     continue;
                 }
                 out.push_str(&format!("{insn}\n"));
             }
             // goto на check-блок цикла — артефакт gcc (вход в while) — подавляем
-            let is_loop_entry = loops.iter().any(|(c, _, _)| blocks[*c].label.as_deref() == Some(target.as_str()));
+            let is_loop_entry = loops
+                .iter()
+                .any(|(c, _, _)| blocks[*c].label.as_deref() == Some(target.as_str()));
             if !is_loop_entry {
                 out.push_str(&format!("goto {target};\n"));
             }
             emitted.insert(i);
         } else {
             for insn in &b.insns {
-                if insn.starts_with("push ") || insn.starts_with("pop ") || insn.starts_with("rsp -= 0x") || insn == "rbp = rsp;" || insn == "leave;" {
+                if insn.starts_with("push ")
+                    || insn.starts_with("pop ")
+                    || insn.starts_with("rsp -= 0x")
+                    || insn == "rbp = rsp;"
+                    || insn == "leave;"
+                {
                     continue;
                 }
                 out.push_str(&format!("{insn}\n"));
@@ -1487,8 +1712,12 @@ pub fn decompile_structured(body: &[String]) -> String {
             // калибровка пролога "arg0 = rdi" — подавить (это сигнатура)
             if let Some(dst) = &lhs {
                 if let Some(reg) = param_map.get(dst) {
-                    let rhs = l.split_once(" = ").map(|(_, b)| b.trim_end_matches(';').trim().to_string()).unwrap_or_default();
-                    let rhs_is_input = ["rdi", "esi", "edx", "rcx", "r8d", "r9d"].contains(&rhs.as_str())
+                    let rhs = l
+                        .split_once(" = ")
+                        .map(|(_, b)| b.trim_end_matches(';').trim().to_string())
+                        .unwrap_or_default();
+                    let rhs_is_input = ["rdi", "esi", "edx", "rcx", "r8d", "r9d"]
+                        .contains(&rhs.as_str())
                         || ["rdi", "rsi", "rdx", "rcx", "r8", "r9"].contains(&rhs.as_str());
                     if rhs_is_input {
                         continue;
@@ -1519,7 +1748,12 @@ pub fn decompile_structured(body: &[String]) -> String {
 fn block_body(b: &Block, indent: usize) -> String {
     let mut s = String::new();
     for insn in &b.insns {
-        if insn.starts_with("push ") || insn == "rbp = rsp;" || insn.starts_with("rsp -= 0x") || insn.starts_with("pop ") || insn == "leave;" {
+        if insn.starts_with("push ")
+            || insn == "rbp = rsp;"
+            || insn.starts_with("rsp -= 0x")
+            || insn.starts_with("pop ")
+            || insn == "leave;"
+        {
             continue;
         }
         s.push_str(&format!("{}\n", " ".repeat(indent)));
@@ -1540,7 +1774,9 @@ fn parse_insns(body: &[String]) -> Vec<Insn> {
             Some((a, r)) => (a.trim(), r.trim()),
             None => continue,
         };
-        let Ok(addr) = u64::from_str_radix(addr, 16) else { continue };
+        let Ok(addr) = u64::from_str_radix(addr, 16) else {
+            continue;
+        };
         // отбросить hex-байты: мнемоника после двойного таба
         let m = match rest.rsplit('\t').next() {
             Some(m) => m.trim(),
@@ -1561,7 +1797,9 @@ fn target_addr(args: &str, func_start: u64) -> Option<u64> {
     let t = args.split_whitespace().last()?;
     let t = t.trim_matches(['<', '>']);
     if let Some((_, off)) = t.split_once('+') {
-        return u64::from_str_radix(off.trim_start_matches("0x"), 16).ok().map(|o| func_start + o);
+        return u64::from_str_radix(off.trim_start_matches("0x"), 16)
+            .ok()
+            .map(|o| func_start + o);
     }
     if let Some(off) = t.strip_prefix("0x") {
         return u64::from_str_radix(off, 16).ok();
@@ -1655,27 +1893,32 @@ pub fn prettify(code: &str) -> String {
 /// но для смещений). Декомпилятор подставляет имя в [arg0+0x670].
 pub fn field_mark(dir: &Path, func: &str, offset_hex: &str, name: &str) -> Result<(), String> {
     let p = func_file(dir, func);
-    let b = EmlBox::open(&p)?;
-    let mut fields: Vec<(String, String)> = Vec::new();
-    for (k, v) in &b.headers {
-        if k.starts_with("X-Field-") {
-            fields.push((k.clone(), v.clone()));
+    // весь блок чтения — под mmap, который закрывается до перезаписи файла
+    // (на Windows запись файла с открытой mmap-секцией — os error 1224)
+    let (fields, listing, callees, refs) = {
+        let b = EmlBox::open(&p)?;
+        let mut fields: Vec<(String, String)> = Vec::new();
+        for (k, v) in &b.headers {
+            if k.starts_with("X-Field-") {
+                fields.push((k.clone(), v.clone()));
+            }
         }
-    }
-    let off = offset_hex.trim_start_matches("0x").to_ascii_lowercase();
-    let tkey = format!("X-Field-0x{off}");
-    if !fields.iter().any(|(k, _)| k == &tkey) {
-        fields.push((tkey, name.to_string()));
-    }
-    // пересоздать с полями (как rewrite, но X-Field-)
-    let listing = b.section("listing").ok_or("no listing")?;
-    let callees: Vec<String> = b
-        .headers
-        .iter()
-        .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
-        .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
-        .collect();
-    let refs: Vec<String> = callers(dir, func)?;
+        let off = offset_hex.trim_start_matches("0x").to_ascii_lowercase();
+        let tkey = format!("X-Field-0x{off}");
+        if !fields.iter().any(|(k, _)| k == &tkey) {
+            fields.push((tkey, name.to_string()));
+        }
+        // пересоздать с полями (как rewrite, но X-Field-)
+        let listing = b.section("listing").ok_or("no listing")?.to_vec();
+        let callees: Vec<String> = b
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+            .collect();
+        let refs = callers(dir, func)?;
+        (fields, listing, callees, refs)
+    };
     let mut extra = String::new();
     extra.push_str("X-EML-Type: Reverse/Binary-Function\r\n");
     extra.push_str(&to_header(&callees));
@@ -1686,8 +1929,14 @@ pub fn field_mark(dir: &Path, func: &str, offset_hex: &str, name: &str) -> Resul
         extra.push_str(&format!("{k}: {v}\r\n"));
     }
     let entity = format!("{}@{}", safe_name(func), BINARY);
-    build_file_with_headers(&p, &entity, func, &extra, vec![Part::raw("listing", "text/x-asm", "listing.txt", listing.to_vec())])
-        .map_err(|e| format!("field {func}: {e}"))
+    build_file_with_headers(
+        &p,
+        &entity,
+        func,
+        &extra,
+        vec![Part::raw("listing", "text/x-asm", "listing.txt", listing)],
+    )
+    .map_err(|e| format!("field {func}: {e}"))
 }
 
 /// X-Field-* из клетки: HashMap "0x670" -> "scrap".

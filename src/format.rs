@@ -115,7 +115,10 @@ pub fn slice(m: &Mmap, off: u64, len: u64) -> Result<&[u8], String> {
     let o = off as usize;
     let l = len as usize;
     if o + l > m.len() {
-        return Err(format!("slice out of bounds: off={off} len={len} file={}", m.len()));
+        return Err(format!(
+            "slice out of bounds: off={off} len={len} file={}",
+            m.len()
+        ));
     }
     Ok(&m[o..o + l])
 }
@@ -126,6 +129,15 @@ pub fn find_blank(data: &[u8]) -> Option<(usize, usize)> {
         for i in 0..data.len() - 3 {
             if &data[i..i + 4] == b"\r\n\r\n" {
                 return Some((i, 4));
+            }
+        }
+    }
+    // CR-CR-LF pairs: a Windows text-mode write translated our own CRLFs
+    // into CR-CR-LF; tolerate the artifact instead of rejecting the message
+    if data.len() >= 8 {
+        for i in 0..data.len() - 7 {
+            if &data[i..i + 8] == b"\r\r\n\r\r\n" {
+                return Some((i, 8));
             }
         }
     }
@@ -187,13 +199,18 @@ pub fn parse_envelope(m: &Mmap) -> Result<(Vec<(String, String)>, usize), String
 /// Parse the fixed-size trailer (last TRAILER_SIZE bytes). Returns key/value map.
 pub fn parse_trailer(t: &[u8]) -> Result<Vec<(String, String)>, String> {
     let text = String::from_utf8_lossy(t);
-    let start = text.find(TRAILER_MARKER).ok_or("trailer marker not found")?;
+    let start = text
+        .find(TRAILER_MARKER)
+        .ok_or("trailer marker not found")?;
     let mut out = Vec::new();
     for line in text[start..].split('\n') {
         let line = line.trim_end_matches('\r');
         if line.starts_with("X-") {
             if let Some(idx) = line.find(": ") {
-                out.push((line[..idx].trim().to_string(), line[idx + 2..].trim().to_string()));
+                out.push((
+                    line[..idx].trim().to_string(),
+                    line[idx + 2..].trim().to_string(),
+                ));
                 continue;
             }
         }

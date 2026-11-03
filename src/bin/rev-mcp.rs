@@ -27,7 +27,12 @@ fn text(s: String) -> Value {
 }
 
 fn run_tool(name: &str, args: &Value) -> Result<Value, String> {
-    let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let s = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     let dir = s("dir");
     let d = std::path::PathBuf::from(&dir);
     match name {
@@ -49,12 +54,24 @@ fn run_tool(name: &str, args: &Value) -> Result<Value, String> {
         }
         "get_callers" => {
             let callers = rev::callers(&d, &s("name"))?;
-            Ok(text(format!("callers of {}: {}", s("name"), callers.join(", "))))
+            Ok(text(format!(
+                "callers of {}: {}",
+                s("name"),
+                callers.join(", ")
+            )))
         }
         "get_callees" => {
             let g = rev::graph(&d)?;
-            let callees = g.iter().find(|(n, _)| n == &s("name")).map(|(_, c)| c.clone()).unwrap_or_default();
-            Ok(text(format!("callees of {}: {}", s("name"), callees.join(", "))))
+            let callees = g
+                .iter()
+                .find(|(n, _)| n == &s("name"))
+                .map(|(_, c)| c.clone())
+                .unwrap_or_default();
+            Ok(text(format!(
+                "callees of {}: {}",
+                s("name"),
+                callees.join(", ")
+            )))
         }
         "cluster" => {
             let hits = rev::cluster(&d, &s("pattern"))?;
@@ -63,7 +80,11 @@ fn run_tool(name: &str, args: &Value) -> Result<Value, String> {
         "wave" => {
             let ticks: usize = args.get("ticks").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
             let hit = rev::type_mark(&d, &s("func"), &s("arg"), &s("ty"), ticks)?;
-            Ok(text(format!("wave reached {}: {}", hit.len(), hit.join(", "))))
+            Ok(text(format!(
+                "wave reached {}: {}",
+                hit.len(),
+                hit.join(", ")
+            )))
         }
         "types" => {
             let tm = rev::type_map(&d)?;
@@ -80,9 +101,12 @@ fn run_tool(name: &str, args: &Value) -> Result<Value, String> {
             let (changed, added, removed) = rev::diff(&d, &std::path::PathBuf::from(s("dir_b")))?;
             Ok(text(format!(
                 "changed ({}): {}\nadded ({}): {}\nremoved ({}): {}",
-                changed.len(), changed.join(", "),
-                added.len(), added.join(", "),
-                removed.len(), removed.join(", ")
+                changed.len(),
+                changed.join(", "),
+                added.len(),
+                added.join(", "),
+                removed.len(),
+                removed.join(", ")
             )))
         }
         "graph" => {
@@ -146,8 +170,15 @@ fn main() {
             }
             "tools/call" => {
                 reply["id"] = id.unwrap_or(Value::Null);
-                let name = msg.pointer("/params/name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let args = msg.pointer("/params/arguments").cloned().unwrap_or(Value::Null);
+                let name = msg
+                    .pointer("/params/name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args = msg
+                    .pointer("/params/arguments")
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 match run_tool(&name, &args) {
                     Ok(r) => reply["result"] = r,
                     Err(e) => reply["error"] = json!({ "code": -32000, "message": e }),
@@ -155,10 +186,15 @@ fn main() {
             }
             _ => {
                 reply["id"] = id.unwrap_or(Value::Null);
-                reply["error"] = json!({ "code": -32601, "message": format!("method not found: {method}") });
+                reply["error"] =
+                    json!({ "code": -32601, "message": format!("method not found: {method}") });
             }
         }
-        let _ = writeln!(stdout, "{}", serde_json::to_string(&reply).unwrap_or_default());
+        let _ = writeln!(
+            stdout,
+            "{}",
+            serde_json::to_string(&reply).unwrap_or_default()
+        );
         let _ = stdout.flush();
     }
 }

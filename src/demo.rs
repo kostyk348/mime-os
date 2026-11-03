@@ -74,8 +74,18 @@ pub fn build_db(path: &Path, entity: &str) -> Result<(), String> {
         "DB: User State & World Data",
         "X-EML-Type: Database/KV\r\n",
         vec![
-            Part::raw("users", "application/json", "users.json", USERS_JSON.as_bytes().to_vec()),
-            Part::raw("items", "application/octet-stream", "spatial_index.bin", spatial),
+            Part::raw(
+                "users",
+                "application/json",
+                "users.json",
+                USERS_JSON.as_bytes().to_vec(),
+            ),
+            Part::raw(
+                "items",
+                "application/octet-stream",
+                "spatial_index.bin",
+                spatial,
+            ),
         ],
     )?;
     Ok(())
@@ -94,13 +104,28 @@ pub fn build_mem(path: &Path, entity: &str) -> Result<(), String> {
         "AI Agent Context & Vector Memory",
         "X-EML-Type: AI/MemoryBank\r\n",
         vec![
-            Part::raw("long_term_facts", "text/markdown", "long_term_facts.md", ltm.as_bytes().to_vec()),
+            Part::raw(
+                "long_term_facts",
+                "text/markdown",
+                "long_term_facts.md",
+                ltm.as_bytes().to_vec(),
+            ),
             Part::raw("vectors", "application/octet-stream", "vectors.idx", vecs),
         ],
     )?;
     // атомарная дозапись turn'ов (X-Turn-ID -> KV turns)
-    kv::set(path, "turns", "90412", json!({"role": "user", "intent": "full_eml_architecture"}))?;
-    kv::set(path, "turns", "90413", json!({"role": "assistant", "intent": "emlbox_slice0"}))?;
+    kv::set(
+        path,
+        "turns",
+        "90412",
+        json!({"role": "user", "intent": "full_eml_architecture"}),
+    )?;
+    kv::set(
+        path,
+        "turns",
+        "90413",
+        json!({"role": "assistant", "intent": "emlbox_slice0"}),
+    )?;
     Ok(())
 }
 
@@ -122,16 +147,46 @@ pub fn build_demo(path: &Path, big: bool) -> Result<(), String> {
         "game_arcade_v1",
         "Retro Arcade — one file",
         vec![
-            Part::raw("view", "text/html", "view.html", VIEW_HTML.as_bytes().to_vec()),
-            Part::raw("logic", "text/x-python", "logic.py", LOGIC_PY.as_bytes().to_vec()),
-            Part::raw("state", "application/json", "state.json", STATE_JSON.as_bytes().to_vec()),
-            Part::raw("users", "application/json", "users.json", USERS_JSON.as_bytes().to_vec()),
-            Part::raw("sprites", "application/octet-stream", "sprites.bin", sprites),
+            Part::raw(
+                "view",
+                "text/html",
+                "view.html",
+                VIEW_HTML.as_bytes().to_vec(),
+            ),
+            Part::raw(
+                "logic",
+                "text/x-python",
+                "logic.py",
+                LOGIC_PY.as_bytes().to_vec(),
+            ),
+            Part::raw(
+                "state",
+                "application/json",
+                "state.json",
+                STATE_JSON.as_bytes().to_vec(),
+            ),
+            Part::raw(
+                "users",
+                "application/json",
+                "users.json",
+                USERS_JSON.as_bytes().to_vec(),
+            ),
+            Part::raw(
+                "sprites",
+                "application/octet-stream",
+                "sprites.bin",
+                sprites,
+            ),
         ],
     )?;
 
     // delta tail: in-self persistence
-    kv::set(path, "users", "player_1", json!({"hp": 80, "x": 43, "y": 109}))?;
+    kv::set(
+        path,
+        "users",
+        "player_1",
+        json!({"hp": 80, "x": 43, "y": 109}),
+    )?;
     kv::set(path, "users", "highscore", json!(12500))?;
     kv::set(path, "users", "level", json!(3))?;
 
@@ -140,6 +195,9 @@ pub fn build_demo(path: &Path, big: bool) -> Result<(), String> {
     let p1 = kv::get(&b, "users", "player_1")?;
     let hs = kv::get(&b, "users", "highscore")?;
     assert_eq!(b.sections.len(), 5, "demo must have 5 base sections");
-    assert!(p1.is_some() && hs == Some(json!(12500)), "demo KV merge failed");
+    assert!(
+        p1.is_some() && hs == Some(json!(12500)),
+        "demo KV merge failed"
+    );
     Ok(())
 }

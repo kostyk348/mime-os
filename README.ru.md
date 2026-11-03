@@ -53,7 +53,7 @@
 | Слой | Команды | Что делает |
 |---|---|---|
 | **Контейнер** | `create`, `mount`, `get`, `verify` | single-file .eml: mmap-ридер, two-level index, append-only дельта-лог с hash-chain |
-| **KV** | `kv get/set/del/dump` | NoSQL-таблицы: base JSON + реплей дельт по seq |
+| **KV** | `kv get/set/del/dump`, `kv get --at N`, `kv history` | NoSQL-таблицы: base JSON + реплей дельт по seq; **путешествие во времени** (`--at N` — состояние после первых N дельт) + журнал аудита |
 | **Database/KV** (модуль 3) | `mkdb` | контейнер-БД: таблицы = MIME-секции, byte-offset map |
 | **AI/MemoryBank** (модуль 4) | `mkmem` | память агента: LTM-вложения + turn'ы дельтами |
 | **IPC-шина** | `ipc send/list` | события = .eml-сообщения в spool-директории |
@@ -223,8 +223,9 @@ emlbox verify app.eml                     # целостность
 Один язык запросов для контейнеров, FS и tagdb:
 
 ```
-поле OP значение [AND поле OP значение ...]
-OP: ==  !=  >=  <=  >  <
+выражение := и (OR и)*         и := фактор (AND фактор)*
+фактор := NOT фактор | ( выражение ) | поле OP значение
+OP: ==  !=  >=  <=  >  <       NOT > AND > OR (как в SQL/баше)
 поле: имя заголовка (X-Tag, X-Device-ID, X-Timestamp, X-EML-Type, ...)
 ```
 
@@ -233,6 +234,17 @@ OP: ==  !=  >=  <=  >  <
 - `X-Tag != "telemetry"` — матч если **ни один** не равен (и если поле отсутствует)
 - `Subject == "arcade"` — подстрока, регистронезависимо
 - Отсутствующее поле: `==` не матчит, `!=` матчит
+
+- **Скобки и вложенность (v0.17)**: `(X-Tag == "a" OR X-Tag == "b") AND NOT X-Timestamp < 100` — любая глубина; значения в кавычках переживают ключевые слова (`X-Note == "buy (milk) AND eggs"` — один клоз)
+
+### Путешествие во времени по журналу дельт
+
+Append-only журнал делает историю чтением первого класса: `kv get state hp --at 2`
+восстанавливает значение после первых двух дельт таблицы (`--at 0` — базовая
+секция), а `kv history state [key]` печатает журнал аудита — writer#seq,
+время, операция, значение — прямо из файла. Префиксы одинаковы на всех
+устройствах: порядок реплея фиксирован по `(ts, writer)`, поэтому time travel
+детерминирован даже между писателями.
 
 ---
 
@@ -291,7 +303,7 @@ cargo build --release
 
 > Починено в этом релизном цикле: бинарная цель `emlbox` и сьют `tests/sync.rs` снова
 > компилируются (`let`-binding для E0716 в обработчике `rev strings`; инициализаторы
-> `Delta{id,after}` обновлены). `cargo test` снова проходит целиком — 69 тестов.
+> `Delta{id,after}` обновлены). `cargo test` снова проходит целиком — 79 тестов.
 > См. [CHANGELOG.md](CHANGELOG.md) → v0.16.0.
 
 Быстрый старт:
@@ -308,7 +320,8 @@ CLI-справка:
 emlbox create <path> <entity> <subject> [--part id:ct:name:file ...]
 emlbox mount <path>
 emlbox get <path> <id> [--out file]
-emlbox kv get|set|del|dump <path> <table> [key] [json]
+emlbox kv get|set|del|dump <path> <table> [key] [json]  # get принимает --at N (time travel)
+emlbox kv history <path> <table> [key]  # журнал аудита: writer#seq, время, операция, значение
 emlbox ipc send|list <bus> [<to> <event> [json]]
 emlbox run <container> [--bus <dir>] [--once]
 emlbox sync export|push|pull|apply|heads <container> [--writer W] [--bus DIR] [--to ENTITY] [--since N]
@@ -398,7 +411,7 @@ pending до прихода предшественника (pull крутитс�
 ## Тесты
 
 ```bash
-cargo test            # полный сьют: 69 тестов, зелёные
+cargo test            # полный сьют: 79 тестов, зелёные
 ```
 
 Сьют покрывает инварианты формата, IPC + Runner, FS, tagdb, pack, сетевую синхронизацию и
@@ -413,6 +426,7 @@ X-Query; по заметкам релизов он рос с 39 тестов (v0
 
 | Версия | Что | Когда |
 |---|---|---|
+| **v0.17.0** | Все фронты: вложенность X-Query (скобки + приоритеты), KV time travel (`--at N`) + журнал аудита, ноль предупреждений clippy, CI на 3 ОС с блокирующими fmt/clippy, релизные бинарники | 2026-11-03 |
 | **v0.16.0** | Docs & promo: README переписан (EN + RU), добавлены CHANGELOG / LIMITATIONS / CONTRIBUTING — без изменений кода | 2026-10-30 |
 | **v0.15.0** | `rev decomp-all` — массовая декомпиляция бинарника в один `.c`; `rev stats`. FTL: 288 функций ShipManager → 33k строк | 2026-09-13 |
 | v0.14.2 | GUI: Rev-вкладка — декомпиляция rev-клетки кнопкой (с полями структур) | 2026-08-23 |
@@ -460,7 +474,7 @@ X-Query; по заметкам релизов он рос с 39 тестов (v0
 - ✅ X-Query OR / NOT (v0.7.1)
 - ⬜ Sandbox для Runner — seccomp / nsjail (сейчас logic исполняется как есть)
 - ⬜ Reindex после текстовых правок; WAL от tear-write
-- ⬜ Вложенность X-Query
+- ✅ Вложенность X-Query — скобки + приоритеты NOT/AND/OR (v0.17)
 - ⬜ SMTP-меш / QUIC как транспорт синка (формат не меняется)
 
 ## Участие в разработке

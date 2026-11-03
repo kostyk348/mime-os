@@ -35,8 +35,8 @@ impl EmlBox {
             .trim()
             .parse()
             .map_err(|_| "bad X-Index-Length")?;
-        let head: HeadIndex =
-            serde_json::from_slice(slice(&mmap, idx_off, idx_len)?).map_err(|e| format!("head index: {e}"))?;
+        let head: HeadIndex = serde_json::from_slice(slice(&mmap, idx_off, idx_len)?)
+            .map_err(|e| format!("head index: {e}"))?;
 
         let n = mmap.len();
         if n < TRAILER_SIZE {
@@ -50,10 +50,16 @@ impl EmlBox {
                 .map(|(_, v)| v.clone())
                 .ok_or_else(|| format!("trailer: missing {k}"))
         };
-        let tio: u64 = get("X-Tail-Index-Offset")?.trim().parse().map_err(|_| "bad tio")?;
-        let til: u64 = get("X-Tail-Index-Length")?.trim().parse().map_err(|_| "bad til")?;
-        let tail: TailIndex =
-            serde_json::from_slice(slice(&mmap, tio, til)?).map_err(|e| format!("tail index: {e}"))?;
+        let tio: u64 = get("X-Tail-Index-Offset")?
+            .trim()
+            .parse()
+            .map_err(|_| "bad tio")?;
+        let til: u64 = get("X-Tail-Index-Length")?
+            .trim()
+            .parse()
+            .map_err(|_| "bad til")?;
+        let tail: TailIndex = serde_json::from_slice(slice(&mmap, tio, til)?)
+            .map_err(|e| format!("tail index: {e}"))?;
         let base_hash = get("X-Base-Hash")?;
         let tail_seq: u64 = get("X-Tail-Seq")?.trim().parse().unwrap_or(0);
         let tail_hash = get("X-Tail-Hash").unwrap_or_default();

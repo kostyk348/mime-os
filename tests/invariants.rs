@@ -1,6 +1,6 @@
 //! Invariant tests: stable base offsets, delta order, hash chain, LF tolerance.
 
-use emlbox::format::{block_header, find_blank, hash_bytes, parse_trailer, TRAILER_MARKER, TRAILER_SIZE};
+use emlbox::format::{block_header, find_blank, hash_bytes, parse_trailer, TRAILER_SIZE};
 use emlbox::kv;
 use emlbox::reader::EmlBox;
 use emlbox::verify;
@@ -32,7 +32,11 @@ fn stable_base_offsets_after_appends() {
     base_file(&p);
 
     let b0 = EmlBox::open(&p).unwrap();
-    let before: Vec<(String, u64, u64)> = b0.sections.iter().map(|s| (s.id.clone(), s.off, s.len)).collect();
+    let before: Vec<(String, u64, u64)> = b0
+        .sections
+        .iter()
+        .map(|s| (s.id.clone(), s.off, s.len))
+        .collect();
 
     // 5 deltas (simulate one delta as KV set, rest raw)
     kv::set(&p, "a", "x", json!(10)).unwrap();
@@ -40,8 +44,15 @@ fn stable_base_offsets_after_appends() {
     kv::set(&p, "a", "z", json!(30)).unwrap();
 
     let b1 = EmlBox::open(&p).unwrap();
-    let after: Vec<(String, u64, u64)> = b1.sections.iter().map(|s| (s.id.clone(), s.off, s.len)).collect();
-    assert_eq!(before, after, "base section offsets MUST NOT change after appends");
+    let after: Vec<(String, u64, u64)> = b1
+        .sections
+        .iter()
+        .map(|s| (s.id.clone(), s.off, s.len))
+        .collect();
+    assert_eq!(
+        before, after,
+        "base section offsets MUST NOT change after appends"
+    );
     assert_eq!(b1.tail.entries.len(), 3);
 
     // data still readable
@@ -61,7 +72,11 @@ fn delta_order_and_delete() {
 
     let b = EmlBox::open(&p).unwrap();
     assert_eq!(kv::get(&b, "a", "n").unwrap(), None, "del must remove key");
-    assert_eq!(kv::get(&b, "a", "k").unwrap(), Some(json!(1)), "base key intact");
+    assert_eq!(
+        kv::get(&b, "a", "k").unwrap(),
+        Some(json!(1)),
+        "base key intact"
+    );
 }
 
 #[test]
@@ -80,12 +95,14 @@ fn tamper_detected_by_verify() {
     base_file(&p);
     kv::set(&p, "a", "x", json!(5)).unwrap();
 
-    // flip one byte inside base section "b" payload
-    let data = std::fs::read(&p).unwrap();
-    let b = EmlBox::open(&p).unwrap();
-    let sec = b.sections.iter().find(|s| s.id == "b").unwrap();
-    let mut data = data;
-    data[(sec.off + 1) as usize] ^= 0xff;
+    // flip one byte inside base section "b" payload; the mmap view must be
+    // closed before the file is rewritten (Windows: os error 1224)
+    let mut data = std::fs::read(&p).unwrap();
+    {
+        let b = EmlBox::open(&p).unwrap();
+        let sec = b.sections.iter().find(|s| s.id == "b").unwrap();
+        data[(sec.off + 1) as usize] ^= 0xff;
+    }
     std::fs::write(&p, &data).unwrap();
 
     let issues = verify::verify(&p).unwrap();
@@ -108,7 +125,11 @@ fn lf_delta_block_is_tolerated() {
     append_block(&p, &block).unwrap();
 
     let b = EmlBox::open(&p).unwrap();
-    assert_eq!(kv::get(&b, "a", "lf").unwrap(), Some(json!(42)), "LF delta must parse");
+    assert_eq!(
+        kv::get(&b, "a", "lf").unwrap(),
+        Some(json!(42)),
+        "LF delta must parse"
+    );
     assert!(verify::verify(&p).unwrap().is_empty());
     assert_eq!(block_header(&block, "X-Delta-Seq").unwrap(), "1");
 }
@@ -145,12 +166,13 @@ fn mount_after_manual_eol_edit_offsets_still_authoritative() {
     let p = tmp("eol");
     base_file(&p);
     let data = std::fs::read(&p).unwrap();
-    let lf = String::from_utf8_lossy(&data).replace("\r\n", "\n").into_bytes();
+    let lf = String::from_utf8_lossy(&data)
+        .replace("\r\n", "\n")
+        .into_bytes();
     std::fs::write(&p, &lf).unwrap();
     // Either verification fails cleanly (base hash mismatch) or the structure
     // breaks so hard the reader errors — both prove the edit was detected.
-    match verify::verify(&p) {
-        Ok(issues) => assert!(!issues.is_empty(), "edited file must fail verification"),
-        Err(_) => {}
+    if let Ok(issues) = verify::verify(&p) {
+        assert!(!issues.is_empty(), "edited file must fail verification")
     }
 }

@@ -39,14 +39,21 @@ pub fn repair(path: &Path) -> Result<(usize, u64), String> {
     let mut entries: Vec<(u64, TailEntry, usize, usize)> = Vec::new(); // (off, entry, end)
     let mut pos = tail_index_off as usize;
     while pos + marker.len() <= data.len() {
-        let Some(rel) = find_sub(&data[pos..], marker) else { break };
+        let Some(rel) = find_sub(&data[pos..], marker) else {
+            break;
+        };
         let block_start = pos + rel;
         let block = &data[block_start..];
         // заголовки до blank
-        let Some((hend, hsep)) = find_blank(block) else { break }; // обрезанный блок
+        let Some((hend, hsep)) = find_blank(block) else {
+            break;
+        }; // обрезанный блок
         let headers = parse_headers(&block[..hend]);
-        let writer = header_get(&headers, "X-Writer-ID").unwrap_or(DEFAULT_WRITER).to_string();
-        let seq: u64 = match header_get(&headers, "X-Delta-Seq").and_then(|s| s.trim().parse().ok()) {
+        let writer = header_get(&headers, "X-Writer-ID")
+            .unwrap_or(DEFAULT_WRITER)
+            .to_string();
+        let seq: u64 = match header_get(&headers, "X-Delta-Seq").and_then(|s| s.trim().parse().ok())
+        {
             Some(s) => s,
             None => break,
         };
@@ -77,17 +84,26 @@ pub fn repair(path: &Path) -> Result<(usize, u64), String> {
         // дельт нет — ничего не восстанавливаем
         return Ok((0, 0));
     }
-    let last_block_end = entries.last().map(|(_, _, e, _)| *e).unwrap_or(tail_index_off as usize);
+    let last_block_end = entries
+        .last()
+        .map(|(_, _, e, _)| *e)
+        .unwrap_or(tail_index_off as usize);
 
     // 3. пересборка tail index + trailer, усечение
-    let new_tail = TailIndex { v: 1, entries: entries.iter().map(|(_, e, _, _)| e.clone()).collect() };
+    let new_tail = TailIndex {
+        v: 1,
+        entries: entries.iter().map(|(_, e, _, _)| e.clone()).collect(),
+    };
     let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
     let new_tail_off = last_block_end as u64;
     let entity = match EmlBox::open(path) {
         Ok(b) => b.entity().unwrap_or_default(),
         Err(_) => "repaired".to_string(),
     };
-    let last_hash = entries.last().map(|(_, e, _, _)| e.hash.clone()).unwrap_or_default();
+    let last_hash = entries
+        .last()
+        .map(|(_, e, _, _)| e.hash.clone())
+        .unwrap_or_default();
     let trailer = render_trailer(
         &entity,
         new_tail.entries.len() as u64,
@@ -98,8 +114,12 @@ pub fn repair(path: &Path) -> Result<(usize, u64), String> {
     );
     let new_len = new_tail_off + new_tail_bytes.len() as u64 + TRAILER_SIZE as u64;
 
-    let mut f = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
-    f.seek(SeekFrom::Start(new_tail_off)).map_err(|e| e.to_string())?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(new_tail_off))
+        .map_err(|e| e.to_string())?;
     f.write_all(&new_tail_bytes).map_err(|e| e.to_string())?;
     f.write_all(&trailer).map_err(|e| e.to_string())?;
     f.set_len(new_len).map_err(|e| e.to_string())?;
@@ -124,30 +144,47 @@ pub fn truncate_blocks(path: &Path, keep: usize) -> Result<(usize, usize), Strin
     if keep >= total {
         return Ok((total, 0));
     }
-    // после repair файл валиден: открываем и пересчитываем
-    let b = EmlBox::open(path)?;
-    let n = b.tail_entries().len();
-    if keep >= n {
-        return Ok((n, 0));
-    }
-    // пересобираем tail из первых keep записей
-    let entries: Vec<TailEntry> = b.tail_entries()[..keep].to_vec();
-    let last = entries.last().cloned().unwrap();
-    let new_tail_off = last.off + last.len;
-    let new_tail = TailIndex { v: 1, entries: entries.clone() };
-    let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
-    let entity = b.entity().unwrap_or_default();
+    // пересчитываем всё под mmap и закрываем его до открытия write-хэндла
+    // на тот же файл — иначе на Windows os error 1224
+    let (n, new_tail_off, new_tail_bytes, entity, base_hash, last_hash) = {
+        let b = EmlBox::open(path)?;
+        let n = b.tail_entries().len();
+        if keep >= n {
+            return Ok((n, 0));
+        }
+        // пересобираем tail из первых keep записей
+        let entries: Vec<TailEntry> = b.tail_entries()[..keep].to_vec();
+        let last = entries.last().cloned().unwrap();
+        let new_tail_off = last.off + last.len;
+        let new_tail = TailIndex { v: 1, entries };
+        let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
+        let entity = b.entity().unwrap_or_default();
+        let base_hash = b.base_hash.clone();
+        let last_hash = last.hash.clone();
+        (
+            n,
+            new_tail_off,
+            new_tail_bytes,
+            entity,
+            base_hash,
+            last_hash,
+        )
+    };
     let trailer = render_trailer(
         &entity,
-        new_tail.entries.len() as u64,
-        &b.base_hash,
-        &last.hash,
+        keep as u64,
+        &base_hash,
+        &last_hash,
         new_tail_off,
         new_tail_bytes.len() as u64,
     );
     let new_len = new_tail_off + new_tail_bytes.len() as u64 + TRAILER_SIZE as u64;
-    let mut f = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
-    f.seek(SeekFrom::Start(new_tail_off)).map_err(|e| e.to_string())?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(new_tail_off))
+        .map_err(|e| e.to_string())?;
     f.write_all(&new_tail_bytes).map_err(|e| e.to_string())?;
     f.write_all(&trailer).map_err(|e| e.to_string())?;
     f.set_len(new_len).map_err(|e| e.to_string())?;

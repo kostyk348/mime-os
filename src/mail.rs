@@ -92,7 +92,10 @@ pub fn unpack(bytes: &[u8]) -> Result<Vec<(String, u64, Vec<u8>)>, String> {
             None => continue,
         };
         let ph = parse_headers(&p[..pend]);
-        if !header_get(&ph, "Content-Type").map(|c| c.starts_with("application/x-emlbox-delta")).unwrap_or(false) {
+        if !header_get(&ph, "Content-Type")
+            .map(|c| c.starts_with("application/x-emlbox-delta"))
+            .unwrap_or(false)
+        {
             continue;
         }
         let block = &p[pend + psep..];
@@ -127,7 +130,10 @@ pub fn apply(container: &Path, bytes: &[u8]) -> Result<(usize, usize), String> {
     let b = EmlBox::open(container)?;
     for (writer, seq, block) in &blocks {
         // идемпотентность: уже есть writer#seq
-        let exists = b.tail_entries().iter().any(|e| &e.writer == writer && e.seq == *seq);
+        let exists = b
+            .tail_entries()
+            .iter()
+            .any(|e| &e.writer == writer && e.seq == *seq);
         if exists {
             applied += 1;
             continue;
@@ -167,7 +173,16 @@ pub fn receive(container: &Path, maildir: &Path) -> Result<(usize, usize), Strin
                     if a > 0 || pnd > 0 {
                         applied_total += a;
                         pending_total += pnd;
-                        let _ = std::fs::rename(&p, proc_dir.join(format!("{}-{}", now_ts(), p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())));
+                        let _ = std::fs::rename(
+                            &p,
+                            proc_dir.join(format!(
+                                "{}-{}",
+                                now_ts(),
+                                p.file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_default()
+                            )),
+                        );
                     }
                 }
                 Err(_) => continue,

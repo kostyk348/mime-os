@@ -40,8 +40,19 @@ impl Part {
 }
 
 /// Build a new container. Returns the absolute offset of the head index payload.
-pub fn build_file(path: &Path, entity: &str, subject: &str, parts: Vec<Part>) -> Result<(), String> {
-    build_file_with_headers(path, entity, subject, "X-EML-Type: Application/Unified\r\n", parts)
+pub fn build_file(
+    path: &Path,
+    entity: &str,
+    subject: &str,
+    parts: Vec<Part>,
+) -> Result<(), String> {
+    build_file_with_headers(
+        path,
+        entity,
+        subject,
+        "X-EML-Type: Application/Unified\r\n",
+        parts,
+    )
 }
 
 /// Build with extra envelope header lines (e.g. X-EML-Type: System/Directory,
@@ -65,7 +76,9 @@ pub fn build_file_with_headers(
          X-Entity-ID: {entity}\r\n{extra_headers}X-EML-Version: {VERSION}\r\n"
     );
     // "X-Index-Offset: " = 16 chars + 20 + \r\n(2) = 38; two lines = 76
-    let head_fixed = pre.len() + 76 + format!("Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n").len();
+    let head_fixed = pre.len()
+        + 76
+        + format!("Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n").len();
 
     // ---- assemble body (data sections + head index), tracking absolute offsets
     let mut body = Vec::new();
@@ -74,7 +87,8 @@ pub fn build_file_with_headers(
 
     for p in &parts {
         // X-Encoding: raw|deflate|aes — секция хранится закодированной
-        let enc_data = crate::encoding::encode(&p.enc, &p.data).map_err(|e| format!("{}: {e}", p.id))?;
+        let enc_data =
+            crate::encoding::encode(&p.enc, &p.data).map_err(|e| format!("{}: {e}", p.id))?;
         let ph = format!(
             "--{boundary}\r\nContent-Type: {}; name=\"{}\"\r\nContent-ID: <{}>\r\nX-Encoding: {}\r\n\r\n",
             p.ct, p.name, p.id, p.enc
@@ -106,7 +120,11 @@ pub fn build_file_with_headers(
     offs += close.len();
 
     // ---- tail index (empty at creation) + trailer
-    let tail_bytes = serde_json::to_vec(&TailIndex { v: 1, entries: vec![] }).map_err(|e| e.to_string())?;
+    let tail_bytes = serde_json::to_vec(&TailIndex {
+        v: 1,
+        entries: vec![],
+    })
+    .map_err(|e| e.to_string())?;
     let tail_off = (head_fixed + offs) as u64;
 
     let env = format!(
@@ -156,14 +174,20 @@ pub fn append_delta_w(path: &Path, writer: &str, delta: &Delta) -> Result<(u64, 
     let (seq, prev) = next_seq_prev(&b, writer);
     let body = serde_json::to_vec(delta).map_err(|e| e.to_string())?;
     let (body, enc_hdr) = match crate::encoding::active_key()? {
-        Some(k) => (crate::encoding::encrypt_key(&k, &body)?, "X-Encoding: aes\r\n"),
+        Some(k) => (
+            crate::encoding::encrypt_key(&k, &body)?,
+            "X-Encoding: aes\r\n",
+        ),
         None => (body, ""),
     };
     // ed25519 подпись тела (если EMLBOX_SEED задан)
     let (key_hdr, sig_hdr) = match crate::sign::active_signer() {
         Some((pk, sk)) => {
             let sig = crate::sign::sign(&sk, &body);
-            (format!("X-Writer-Key: {pk}\r\n"), format!("X-Signature: {sig}\r\n"))
+            (
+                format!("X-Writer-Key: {pk}\r\n"),
+                format!("X-Signature: {sig}\r\n"),
+            )
         }
         None => (String::new(), String::new()),
     };
@@ -187,7 +211,11 @@ pub fn append_delta(path: &Path, delta: &Delta) -> Result<(u64, String), String>
 ///
 /// Out-of-order blocks (seq != next, or prev mismatch) are rejected — на
 /// синке они остаются pending до прихода предшественника.
-pub fn append_block_w(path: &Path, expected_writer: &str, block: &[u8]) -> Result<(u64, String), String> {
+pub fn append_block_w(
+    path: &Path,
+    expected_writer: &str,
+    block: &[u8],
+) -> Result<(u64, String), String> {
     let b = EmlBox::open(path)?;
     if block_header(block, "X-EMLBox-Delta").is_none() {
         return Err("block: not an X-EMLBox-Delta block".into());
@@ -202,7 +230,9 @@ pub fn append_block_w(path: &Path, expected_writer: &str, block: &[u8]) -> Resul
     let entity = b.entity().ok_or("container has no X-Entity-ID")?;
 
     if writer != expected_writer {
-        return Err(format!("block writer {writer} != expected {expected_writer}"));
+        return Err(format!(
+            "block writer {writer} != expected {expected_writer}"
+        ));
     }
     let (next_seq, expected_prev) = next_seq_prev(&b, &writer);
     if seq != next_seq {
@@ -211,7 +241,9 @@ pub fn append_block_w(path: &Path, expected_writer: &str, block: &[u8]) -> Resul
         ));
     }
     if prev != expected_prev {
-        return Err(format!("prev hash mismatch for {writer}#{seq}: got {prev}, expected {expected_prev}"));
+        return Err(format!(
+            "prev hash mismatch for {writer}#{seq}: got {prev}, expected {expected_prev}"
+        ));
     }
 
     let block_hash = hash_bytes(block);
@@ -241,8 +273,12 @@ pub fn append_block_w(path: &Path, expected_writer: &str, block: &[u8]) -> Resul
         new_tail_bytes.len() as u64,
     );
 
-    let mut f = OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
-    f.seek(SeekFrom::Start(block_off)).map_err(|e| e.to_string())?;
+    let mut f = OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(block_off))
+        .map_err(|e| e.to_string())?;
     f.write_all(block).map_err(|e| e.to_string())?;
     f.write_all(&new_tail_bytes).map_err(|e| e.to_string())?;
     f.write_all(&trailer).map_err(|e| e.to_string())?;
