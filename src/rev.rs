@@ -503,18 +503,23 @@ pub fn type_mark(
         if !p.exists() {
             continue;
         }
-        let b = EmlBox::open(&p)?;
-        let mut types: Vec<(String, String)> = Vec::new();
-        for (k, v) in &b.headers {
-            let k = k.to_string();
-            if k.starts_with("X-Type-") {
-                types.push((k, v.clone()));
+        // the mmap view is closed at the end of this block — rewriting the
+        // same file while it is mapped fails on Windows (os error 1224)
+        let types: Vec<(String, String)> = {
+            let b = EmlBox::open(&p)?;
+            let mut types: Vec<(String, String)> = Vec::new();
+            for (k, v) in &b.headers {
+                let k = k.to_string();
+                if k.starts_with("X-Type-") {
+                    types.push((k, v.clone()));
+                }
             }
-        }
-        let tkey = format!("X-Type-arg{marked_arg}");
-        if !types.iter().any(|(k, _)| k == &tkey) {
-            types.push((tkey.clone(), ty.to_string()));
-        }
+            let tkey = format!("X-Type-arg{marked_arg}");
+            if !types.iter().any(|(k, _)| k == &tkey) {
+                types.push((tkey.clone(), ty.to_string()));
+            }
+            types
+        };
         reached.push(format!("{name} (arg{marked_arg})"));
         rewrite(dir, &name, &types)?;
         // распространить вверх: кто вызывает name и реально передаёт параметр
@@ -532,15 +537,20 @@ pub fn type_mark(
 
 fn rewrite(dir: &Path, name: &str, types: &[(String, String)]) -> Result<(), String> {
     let p = func_file(dir, name);
-    let b = EmlBox::open(&p)?;
-    let listing = b.section("listing").ok_or("no listing section")?;
-    let callees: Vec<String> = b
-        .headers
-        .iter()
-        .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
-        .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
-        .collect();
-    let refs: Vec<String> = callers(dir, name)?;
+    // read everything under the mmap, then close it before rewriting the file
+    // (Windows: writing a user-mapped section fails with os error 1224)
+    let (listing, callees, refs) = {
+        let b = EmlBox::open(&p)?;
+        let listing = b.section("listing").ok_or("no listing section")?.to_vec();
+        let callees: Vec<String> = b
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+            .collect();
+        let refs = callers(dir, name)?;
+        (listing, callees, refs)
+    };
     let mut extra = String::new();
     extra.push_str("X-EML-Type: Reverse/Binary-Function\r\n");
     extra.push_str(&to_header(&callees));
@@ -556,12 +566,7 @@ fn rewrite(dir: &Path, name: &str, types: &[(String, String)]) -> Result<(), Str
         &entity,
         name,
         &extra,
-        vec![Part::raw(
-            "listing",
-            "text/x-asm",
-            "listing.txt",
-            listing.to_vec(),
-        )],
+        vec![Part::raw("listing", "text/x-asm", "listing.txt", listing)],
     )
     .map_err(|e| format!("rewrite {name}: {e}"))
 }
@@ -975,21 +980,25 @@ pub fn branch(dir: &Path, func: &str, branch_name: &str, depth: usize) -> Result
         if refs.is_empty() {
             continue;
         }
-        // дописать References в клетку (пересоздать)
-        let b = EmlBox::open(&func_file(dir, &bn))?;
-        let listing = b.section("listing").ok_or("no listing")?;
-        let callees: Vec<String> = b
-            .headers
-            .iter()
-            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
-            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
-            .collect();
+        // дописать References в клетку (пересоздать); mmap закрывается до
+        // перезаписи файла — иначе на Windows os error 1224
+        let (listing, callees, cs) = {
+            let b = EmlBox::open(&func_file(dir, &bn))?;
+            let listing = b.section("listing").ok_or("no listing")?.to_vec();
+            let callees: Vec<String> = b
+                .headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+                .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+                .collect();
+            let cs = call_site_hdr(&b, &seen, branch_name);
+            (listing, callees, cs)
+        };
         let root_hdr = if *n == *func {
             "X-Branch-Root: 1\r\n"
         } else {
             ""
         };
-        let cs = call_site_hdr(&b, &seen, branch_name);
         let extra = format!(
             "X-EML-Type: Reverse/Binary-Function\r\nX-Callees: {}\r\nReferences: {}\r\n{cs}In-Reply-To: {n}\r\nX-Branch: {branch_name}\r\n{root_hdr}",
             callees.join(", "),
@@ -1000,12 +1009,7 @@ pub fn branch(dir: &Path, func: &str, branch_name: &str, depth: usize) -> Result
             &format!("{}@{branch_name}@{}", safe_name(n), BINARY),
             &bn,
             &extra,
-            vec![Part::raw(
-                "listing",
-                "text/x-asm",
-                "listing.txt",
-                listing.to_vec(),
-            )],
+            vec![Part::raw("listing", "text/x-asm", "listing.txt", listing)],
         )
         .map_err(|e| format!("refs {bn}: {e}"))?;
     }
@@ -1889,27 +1893,32 @@ pub fn prettify(code: &str) -> String {
 /// но для смещений). Декомпилятор подставляет имя в [arg0+0x670].
 pub fn field_mark(dir: &Path, func: &str, offset_hex: &str, name: &str) -> Result<(), String> {
     let p = func_file(dir, func);
-    let b = EmlBox::open(&p)?;
-    let mut fields: Vec<(String, String)> = Vec::new();
-    for (k, v) in &b.headers {
-        if k.starts_with("X-Field-") {
-            fields.push((k.clone(), v.clone()));
+    // весь блок чтения — под mmap, который закрывается до перезаписи файла
+    // (на Windows запись файла с открытой mmap-секцией — os error 1224)
+    let (fields, listing, callees, refs) = {
+        let b = EmlBox::open(&p)?;
+        let mut fields: Vec<(String, String)> = Vec::new();
+        for (k, v) in &b.headers {
+            if k.starts_with("X-Field-") {
+                fields.push((k.clone(), v.clone()));
+            }
         }
-    }
-    let off = offset_hex.trim_start_matches("0x").to_ascii_lowercase();
-    let tkey = format!("X-Field-0x{off}");
-    if !fields.iter().any(|(k, _)| k == &tkey) {
-        fields.push((tkey, name.to_string()));
-    }
-    // пересоздать с полями (как rewrite, но X-Field-)
-    let listing = b.section("listing").ok_or("no listing")?;
-    let callees: Vec<String> = b
-        .headers
-        .iter()
-        .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
-        .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
-        .collect();
-    let refs: Vec<String> = callers(dir, func)?;
+        let off = offset_hex.trim_start_matches("0x").to_ascii_lowercase();
+        let tkey = format!("X-Field-0x{off}");
+        if !fields.iter().any(|(k, _)| k == &tkey) {
+            fields.push((tkey, name.to_string()));
+        }
+        // пересоздать с полями (как rewrite, но X-Field-)
+        let listing = b.section("listing").ok_or("no listing")?.to_vec();
+        let callees: Vec<String> = b
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("X-Callees"))
+            .flat_map(|(_, v)| v.split(',').map(|s| s.trim().to_string()))
+            .collect();
+        let refs = callers(dir, func)?;
+        (fields, listing, callees, refs)
+    };
     let mut extra = String::new();
     extra.push_str("X-EML-Type: Reverse/Binary-Function\r\n");
     extra.push_str(&to_header(&callees));
@@ -1925,12 +1934,7 @@ pub fn field_mark(dir: &Path, func: &str, offset_hex: &str, name: &str) -> Resul
         &entity,
         func,
         &extra,
-        vec![Part::raw(
-            "listing",
-            "text/x-asm",
-            "listing.txt",
-            listing.to_vec(),
-        )],
+        vec![Part::raw("listing", "text/x-asm", "listing.txt", listing)],
     )
     .map_err(|e| format!("field {func}: {e}"))
 }

@@ -27,6 +27,14 @@ quality gates go from advisory to blocking.
   <table> [key]`: writer#seq, timestamp, op, key and value per delta, straight from the
   file. Filterable by key; an unknown table yields an empty log, not an error.
 
+### Fixed
+- **Windows: "user-mapped section" (os error 1224) when rewriting rev cells** — `type_mark`,
+  `rewrite`, `field_mark` and the `branch` references pass held an `EmlBox` mmap view of a
+  cell while rebuilding that same file; on Unix a mapped file can be rewritten, on Windows
+  it cannot. All four paths now read what they need under the mapping and close it before
+  the write (the listing slice is copied into a `Vec` inside the scope). The whole suite
+  passes on windows-latest for the first time.
+
 ### Changed
 - **CI hardened** (`.github/workflows/ci.yml`): the build job runs the full suite on a
   **three-OS matrix** (ubuntu / macos / windows); `cargo fmt --check` and
