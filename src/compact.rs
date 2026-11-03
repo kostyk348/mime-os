@@ -24,7 +24,11 @@ pub fn compact(src: &Path, out: &Path) -> Result<(usize, usize), String> {
         if k.starts_with("X-")
             && !matches!(
                 k.as_str(),
-                "X-Index-Offset" | "X-Index-Length" | "X-EML-Version" | "X-Entity-ID" | "X-EML-Type"
+                "X-Index-Offset"
+                    | "X-Index-Length"
+                    | "X-EML-Version"
+                    | "X-Entity-ID"
+                    | "X-EML-Type"
             )
         {
             extra.push_str(&format!("{k}: {v}\r\n"));
@@ -56,7 +60,9 @@ pub fn compact(src: &Path, out: &Path) -> Result<(usize, usize), String> {
             });
         } else {
             // прочие секции: декодированные данные как есть, enc сохраняется
-            let data = b.section(&s.id).ok_or_else(|| format!("section {} read failed", s.id))?;
+            let data = b
+                .section(&s.id)
+                .ok_or_else(|| format!("section {} read failed", s.id))?;
             parts.push(Part {
                 id: s.id.clone(),
                 ct: s.ct.clone(),

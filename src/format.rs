@@ -115,7 +115,10 @@ pub fn slice(m: &Mmap, off: u64, len: u64) -> Result<&[u8], String> {
     let o = off as usize;
     let l = len as usize;
     if o + l > m.len() {
-        return Err(format!("slice out of bounds: off={off} len={len} file={}", m.len()));
+        return Err(format!(
+            "slice out of bounds: off={off} len={len} file={}",
+            m.len()
+        ));
     }
     Ok(&m[o..o + l])
 }
@@ -187,13 +190,18 @@ pub fn parse_envelope(m: &Mmap) -> Result<(Vec<(String, String)>, usize), String
 /// Parse the fixed-size trailer (last TRAILER_SIZE bytes). Returns key/value map.
 pub fn parse_trailer(t: &[u8]) -> Result<Vec<(String, String)>, String> {
     let text = String::from_utf8_lossy(t);
-    let start = text.find(TRAILER_MARKER).ok_or("trailer marker not found")?;
+    let start = text
+        .find(TRAILER_MARKER)
+        .ok_or("trailer marker not found")?;
     let mut out = Vec::new();
     for line in text[start..].split('\n') {
         let line = line.trim_end_matches('\r');
         if line.starts_with("X-") {
             if let Some(idx) = line.find(": ") {
-                out.push((line[..idx].trim().to_string(), line[idx + 2..].trim().to_string()));
+                out.push((
+                    line[..idx].trim().to_string(),
+                    line[idx + 2..].trim().to_string(),
+                ));
                 continue;
             }
         }

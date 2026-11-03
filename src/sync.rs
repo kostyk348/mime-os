@@ -41,7 +41,8 @@ pub fn export(container: &Path, writer: &str, since: u64) -> Result<Vec<(u64, Ve
 /// Головы цепочек писателей: (writer, last_seq, last_hash).
 pub fn heads(container: &Path) -> Result<Vec<(String, u64, String)>, String> {
     let b = EmlBox::open(container)?;
-    let mut map: std::collections::HashMap<String, (u64, String)> = std::collections::HashMap::new();
+    let mut map: std::collections::HashMap<String, (u64, String)> =
+        std::collections::HashMap::new();
     for e in b.tail_entries() {
         match map.get_mut(&e.writer) {
             Some(cur) if e.seq > cur.0 => *cur = (e.seq, e.hash.clone()),
@@ -62,7 +63,11 @@ pub fn apply_block(container: &Path, block: &[u8]) -> Result<(String, u64), Stri
     let (end, _) = find_blank(block).ok_or("sync block: no headers")?;
     let h = parse_headers(&block[..end]);
     let writer = header_get(&h, "X-Writer-ID").unwrap_or("local").to_string();
-    let seq: u64 = header_get(&h, "X-Delta-Seq").ok_or("no seq")?.trim().parse().map_err(|_| "bad seq")?;
+    let seq: u64 = header_get(&h, "X-Delta-Seq")
+        .ok_or("no seq")?
+        .trim()
+        .parse()
+        .map_err(|_| "bad seq")?;
     append_block_w(container, &writer, block)?;
     Ok((writer, seq))
 }
@@ -78,7 +83,13 @@ fn msg_bytes(entity: &str, to: &str, writer: &str, block: &[u8]) -> Vec<u8> {
 }
 
 /// Экспортировать блоки писателя (seq > since) в шину как sync-сообщения.
-pub fn push(container: &Path, writer: &str, bus: &Path, to: &str, since: u64) -> Result<usize, String> {
+pub fn push(
+    container: &Path,
+    writer: &str,
+    bus: &Path,
+    to: &str,
+    since: u64,
+) -> Result<usize, String> {
     std::fs::create_dir_all(bus).map_err(|e| e.to_string())?;
     let b = EmlBox::open(container)?;
     let entity = b.entity().ok_or("no entity")?;
@@ -111,7 +122,10 @@ pub fn pull(container: &Path, bus: &Path) -> Result<(usize, usize), String> {
     let mut files: Vec<PathBuf> = Vec::new();
     for e in rd.flatten() {
         let p = e.path();
-        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         if name.ends_with(".msg.eml") && !name.contains("ignore") {
             files.push(p);
         }
@@ -138,7 +152,9 @@ pub fn pull(container: &Path, bus: &Path) -> Result<(usize, usize), String> {
             if header_get(&h, "X-EMLBox-Sync").is_none() {
                 continue; // не sync-сообщение
             }
-            let to = header_get(&h, "To").unwrap_or("").trim_matches(|c| c == '<' || c == '>' || c == ' ');
+            let to = header_get(&h, "To")
+                .unwrap_or("")
+                .trim_matches(|c| c == '<' || c == '>' || c == ' ');
             if to != entity && to != "*" {
                 continue; // не нам
             }
@@ -148,12 +164,17 @@ pub fn pull(container: &Path, bus: &Path) -> Result<(usize, usize), String> {
                 None => continue,
             };
             let bh = parse_headers(&block[..wend]);
-            let writer = header_get(&bh, "X-Writer-ID").unwrap_or("local").to_string();
+            let writer = header_get(&bh, "X-Writer-ID")
+                .unwrap_or("local")
+                .to_string();
             let seq: u64 = header_get(&bh, "X-Delta-Seq")
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(0);
             // идемпотентность: блок уже применён (та же writer#seq)
-            let exists = b.tail_entries().iter().any(|e| e.writer == writer && e.seq == seq);
+            let exists = b
+                .tail_entries()
+                .iter()
+                .any(|e| e.writer == writer && e.seq == seq);
             if exists {
                 applied += 1;
                 changed = true;
@@ -207,7 +228,8 @@ fn read_frame(s: &mut impl Read) -> Result<Option<Vec<u8>>, String> {
         return Err(format!("frame too large: {len}"));
     }
     let mut buf = vec![0u8; len];
-    s.read_exact(&mut buf).map_err(|e| format!("read payload: {e}"))?;
+    s.read_exact(&mut buf)
+        .map_err(|e| format!("read payload: {e}"))?;
     Ok(Some(buf))
 }
 
@@ -220,11 +242,17 @@ fn write_frame(s: &mut impl Write, payload: &[u8]) -> Result<(), String> {
 
 /// writer -> last_seq
 fn manifest(container: &Path) -> Result<Vec<(String, u64)>, String> {
-    Ok(heads(container)?.into_iter().map(|(w, seq, _)| (w, seq)).collect())
+    Ok(heads(container)?
+        .into_iter()
+        .map(|(w, seq, _)| (w, seq))
+        .collect())
 }
 
 /// Блоки `from`, которых нет у `to_known` (writer -> max seq, 0 если нет).
-fn missing_blocks(from: &Path, to_known: &[(String, u64)]) -> Result<Vec<(String, u64, Vec<u8>)>, String> {
+fn missing_blocks(
+    from: &Path,
+    to_known: &[(String, u64)],
+) -> Result<Vec<(String, u64, Vec<u8>)>, String> {
     let known: std::collections::HashMap<String, u64> = to_known.iter().cloned().collect();
     let b = EmlBox::open(from)?;
     let mut out = Vec::new();
@@ -270,23 +298,23 @@ pub fn tcp_serve_once(container: &Path, mut stream: TcpStream) -> Result<(), Str
     let frame = read_frame(&mut stream)?.ok_or("peer closed before MANIFEST")?;
     let f = String::from_utf8_lossy(&frame);
     let their_manifest = match f.strip_prefix("MANIFEST ") {
-        Some(j) => serde_json::from_str::<Vec<(String, u64)>>(j).map_err(|e| format!("bad manifest: {e}"))?,
+        Some(j) => serde_json::from_str::<Vec<(String, u64)>>(j)
+            .map_err(|e| format!("bad manifest: {e}"))?,
         None => return Err("expected MANIFEST".into()),
     };
     // 1. свой манифест
     let mine = manifest(container)?;
-    write_frame(&mut stream, format!("MANIFEST {}", serde_json::to_string(&mine).unwrap()).as_bytes())?;
+    write_frame(
+        &mut stream,
+        format!("MANIFEST {}", serde_json::to_string(&mine).unwrap()).as_bytes(),
+    )?;
     // 2. блоки, которых не хватает пиру
     let for_peer = missing_blocks(container, &their_manifest)?;
     send_blocks(&mut stream, &for_peer)?;
     write_frame(&mut stream, b"DONE")?;
     // 3. принять блоки пира, которых не хватает нам
     let mut got = 0usize;
-    loop {
-        let frame = match read_frame(&mut stream)? {
-            Some(f) => f,
-            None => break,
-        };
+    while let Some(frame) = read_frame(&mut stream)? {
         if frame.starts_with(b"BLOCK ") {
             let block = &frame[6..];
             let writer = crate::format::block_header(block, "X-Writer-ID")
@@ -306,7 +334,10 @@ pub fn tcp_connect(container: &Path, peer: &str) -> Result<(usize, usize), Strin
     let mut stream = TcpStream::connect(peer).map_err(|e| format!("connect {peer}: {e}"))?;
     // 1. свой манифест
     let mine = manifest(container)?;
-    write_frame(&mut stream, format!("MANIFEST {}", serde_json::to_string(&mine).unwrap()).as_bytes())?;
+    write_frame(
+        &mut stream,
+        format!("MANIFEST {}", serde_json::to_string(&mine).unwrap()).as_bytes(),
+    )?;
     // 2. принять манифест пира + его блоки
     let mut their_manifest = Vec::new();
     let mut received = 0usize;

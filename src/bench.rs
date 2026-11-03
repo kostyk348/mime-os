@@ -38,8 +38,18 @@ pub fn mount_bench(dir: &Path, n: usize) -> Result<String, String> {
             &format!("bench{i}"),
             &format!("bench file {i}"),
             vec![
-                Part::raw("meta", "application/json", "meta.json", format!(r#"{{"i":{i}}}"#).into_bytes()),
-                Part::raw("view", "text/html", "view.html", format!("<html><b>{i}</b></html>").into_bytes()),
+                Part::raw(
+                    "meta",
+                    "application/json",
+                    "meta.json",
+                    format!(r#"{{"i":{i}}}"#).into_bytes(),
+                ),
+                Part::raw(
+                    "view",
+                    "text/html",
+                    "view.html",
+                    format!("<html><b>{i}</b></html>").into_bytes(),
+                ),
             ],
         )?;
     }
@@ -84,13 +94,23 @@ pub fn append_bench(path: &Path, n: usize) -> Result<String, String> {
             path,
             "bench",
             "append bench",
-            vec![Part::raw("users", "application/json", "users.json", br#"{}"#.to_vec())],
+            vec![Part::raw(
+                "users",
+                "application/json",
+                "users.json",
+                br#"{}"#.to_vec(),
+            )],
         )?;
     }
     let mut samples = Vec::new();
     for i in 0..n {
         let t = Instant::now();
-        kv::set(path, "users", &format!("k{i}"), json!({"i": i, "pad": "x".repeat(32)}))?;
+        kv::set(
+            path,
+            "users",
+            &format!("k{i}"),
+            json!({"i": i, "pad": "x".repeat(32)}),
+        )?;
         samples.push(ns(t));
     }
     let head = samples[0];

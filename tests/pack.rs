@@ -33,7 +33,10 @@ fn pack_unpack_roundtrip_binary_and_text() {
     assert_eq!(n, 3);
 
     assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"hello world");
-    assert_eq!(std::fs::read(dest.join("sub/b.json")).unwrap(), br#"{"k":1}"#);
+    assert_eq!(
+        std::fs::read(dest.join("sub/b.json")).unwrap(),
+        br#"{"k":1}"#
+    );
     assert_eq!(std::fs::read(dest.join("sub/deep/c.bin")).unwrap(), bin);
 }
 
@@ -61,7 +64,12 @@ fn unpack_rejects_path_traversal() {
         &out,
         "evil@system.local",
         "evil",
-        vec![Part::raw("../../evil", "text/plain", "../../evil", b"pwn".to_vec())],
+        vec![Part::raw(
+            "../../evil",
+            "text/plain",
+            "../../evil",
+            b"pwn".to_vec(),
+        )],
     )
     .unwrap();
     let dest = root.join("out");

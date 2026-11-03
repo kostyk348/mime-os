@@ -40,9 +40,15 @@ pub fn record_bytes(
     if !device.is_empty() {
         hdr.push_str(&format!("X-Device-ID: {device}\r\n"));
     }
-    hdr.push_str(&format!("X-Timestamp: {ts}\r\nContent-Type: application/json\r\n\r\n"));
+    hdr.push_str(&format!(
+        "X-Timestamp: {ts}\r\nContent-Type: application/json\r\n\r\n"
+    ));
     let mut buf = hdr.into_bytes();
-    buf.extend_from_slice(serde_json::to_vec(body).map_err(|e| e.to_string())?.as_slice());
+    buf.extend_from_slice(
+        serde_json::to_vec(body)
+            .map_err(|e| e.to_string())?
+            .as_slice(),
+    );
     Ok(buf)
 }
 
@@ -57,7 +63,14 @@ fn read_headers(p: &Path) -> Result<Vec<(String, String)>, String> {
 }
 
 /// Atomic insert: write tmp + rename. A power cut can never leave a torn record.
-pub fn insert(db: &Path, id: &str, tags: &[String], device: &str, ts: u64, body: &Value) -> Result<PathBuf, String> {
+pub fn insert(
+    db: &Path,
+    id: &str,
+    tags: &[String],
+    device: &str,
+    ts: u64,
+    body: &Value,
+) -> Result<PathBuf, String> {
     std::fs::create_dir_all(db).map_err(|e| e.to_string())?;
     // id becomes a filename in db/ — must stay flat and inside the dir
     if id.is_empty()
@@ -67,7 +80,9 @@ pub fn insert(db: &Path, id: &str, tags: &[String], device: &str, ts: u64, body:
         || id == ".."
         || id.contains("..")
     {
-        return Err(format!("unsafe record id: {id:?} (must be a flat filename)"));
+        return Err(format!(
+            "unsafe record id: {id:?} (must be a flat filename)"
+        ));
     }
     let buf = record_bytes(id, tags, device, ts, body)?;
     let tmp = db.join(format!("{id}.eml.tmp"));
@@ -77,9 +92,12 @@ pub fn insert(db: &Path, id: &str, tags: &[String], device: &str, ts: u64, body:
     Ok(final_path)
 }
 
+/// Одна запись tagdb: (путь, заголовки).
+pub type Record = (PathBuf, Vec<(String, String)>);
+
 /// Header-only scan: bounded read of the first bytes, body never touched.
 /// Corrupted files are skipped (returned separately).
-pub fn scan(db: &Path) -> Result<(Vec<(PathBuf, Vec<(String, String)>)>, usize), String> {
+pub fn scan(db: &Path) -> Result<(Vec<Record>, usize), String> {
     let mut out = Vec::new();
     let mut corrupt = 0usize;
     let rd = std::fs::read_dir(db).map_err(|e| e.to_string())?;
@@ -96,7 +114,7 @@ pub fn scan(db: &Path) -> Result<(Vec<(PathBuf, Vec<(String, String)>)>, usize),
 }
 
 /// Query over header-only scan. Returns (matches, corrupt_count).
-pub fn query(db: &Path, q: &str) -> Result<(Vec<(PathBuf, Vec<(String, String)>)>, usize), String> {
+pub fn query(db: &Path, q: &str) -> Result<(Vec<Record>, usize), String> {
     let (records, corrupt) = scan(db)?;
     let mut out = Vec::new();
     for (p, h) in &records {
@@ -145,9 +163,20 @@ pub fn bench(db: &Path, n: usize, body_kb: usize) -> Result<String, String> {
     for i in 0..n {
         let tags = vec![
             "sensor_data".to_string(),
-            if i % hit_every == 0 { "telemetry".to_string() } else { "status_ok".to_string() },
+            if i % hit_every == 0 {
+                "telemetry".to_string()
+            } else {
+                "status_ok".to_string()
+            },
         ];
-        insert(db, &format!("rec_{i:06}"), &tags, "node_01", 1786528800 + i as u64, &body(i))?;
+        insert(
+            db,
+            &format!("rec_{i:06}"),
+            &tags,
+            "node_01",
+            1786528800 + i as u64,
+            &body(i),
+        )?;
     }
     let tagdb_insert = t.elapsed().as_nanos() as f64 / n as f64;
 
@@ -161,7 +190,11 @@ pub fn bench(db: &Path, n: usize, body_kb: usize) -> Result<String, String> {
             "tags": if i % hit_every == 0 { ["telemetry"] } else { ["status_ok"] },
             "samples": payload, "temp": 24.5
         });
-        std::fs::write(flat.join(format!("rec_{i:06}.json")), serde_json::to_vec(&rec).unwrap()).map_err(|e| e.to_string())?;
+        std::fs::write(
+            flat.join(format!("rec_{i:06}.json")),
+            serde_json::to_vec(&rec).unwrap(),
+        )
+        .map_err(|e| e.to_string())?;
     }
     let flat_insert = t.elapsed().as_nanos() as f64 / n as f64;
 
@@ -178,7 +211,12 @@ pub fn bench(db: &Path, n: usize, body_kb: usize) -> Result<String, String> {
         &db.join("single.eml"),
         "db_single@system.local",
         "DB: all records",
-        vec![crate::writer::Part::raw("recs", "application/json", "recs.json", serde_json::to_vec(&all).unwrap())],
+        vec![crate::writer::Part::raw(
+            "recs",
+            "application/json",
+            "recs.json",
+            serde_json::to_vec(&all).unwrap(),
+        )],
     )?;
     let single_build = t.elapsed().as_nanos() as f64;
 
@@ -212,11 +250,15 @@ pub fn bench(db: &Path, n: usize, body_kb: usize) -> Result<String, String> {
 
     let t = std::time::Instant::now();
     let b = crate::reader::EmlBox::open(&db.join("single.eml"))?;
-    let recs: Value = serde_json::from_slice(&b.section("recs").unwrap()).map_err(|e| e.to_string())?;
+    let recs: Value =
+        serde_json::from_slice(&b.section("recs").unwrap()).map_err(|e| e.to_string())?;
     let mut single_hit = 0usize;
     if let Value::Object(map) = &recs {
         for v in map.values() {
-            if v.get("tags").map(|x| x == &serde_json::json!(["telemetry"])).unwrap_or(false) {
+            if v.get("tags")
+                .map(|x| x == &serde_json::json!(["telemetry"]))
+                .unwrap_or(false)
+            {
                 single_hit += 1;
             }
         }

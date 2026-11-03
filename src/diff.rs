@@ -56,20 +56,30 @@ pub fn diff_lines(old: &[(String, String)], new: &[String]) -> Vec<LineOp> {
 
     // Слияние: идём по позициям нового и старого одновременно
     let mut mi = 0usize; // индекс в matches
-    for j in 0..new.len() {
+    for (j, line) in new.iter().enumerate() {
         if matched_new.contains(&j) {
             // совпавшая строка: если текст изменился (set), обновить last_kept
             let (oi, _) = matches[mi];
-            if old[oi].1 != new[j] {
-                ops.push(LineOp::Set { id: old[oi].0.clone(), text: new[j].clone() });
+            if old[oi].1 != *line {
+                ops.push(LineOp::Set {
+                    id: old[oi].0.clone(),
+                    text: line.clone(),
+                });
             }
             last_kept = Some(old[oi].0.clone());
             last_op_add = false;
             mi += 1;
         } else {
             // новая строка без матча: add после last_kept (или после предыдущей вставки)
-            let after = if last_op_add { Some("__next__".to_string()) } else { last_kept.clone() };
-            ops.push(LineOp::Add { after, text: new[j].clone() });
+            let after = if last_op_add {
+                Some("__next__".to_string())
+            } else {
+                last_kept.clone()
+            };
+            ops.push(LineOp::Add {
+                after,
+                text: line.clone(),
+            });
             last_op_add = true;
         }
     }
@@ -87,7 +97,11 @@ mod diff_tests {
     use super::*;
     #[test]
     fn edits_reproduce_new_document() {
-        let old = vec![("a#1".to_string(), "План:".into()), ("a#2".to_string(), "X".into()), ("a#3".to_string(), "Y".into())];
+        let old = vec![
+            ("a#1".to_string(), "План:".into()),
+            ("a#2".to_string(), "X".into()),
+            ("a#3".to_string(), "Y".into()),
+        ];
         let new = vec!["План:".to_string(), "X v2".into(), "Z".into()];
         let ops = diff_lines(&old, &new);
         // применить ops к old -> new (id добавленных: a#2b, a#3b — по порядку)
@@ -103,7 +117,11 @@ mod diff_tests {
                     } else {
                         after.clone()
                     };
-                    let pos = eff_after.as_ref().and_then(|a| cur.iter().position(|(i, _)| i == a)).map(|p| p + 1).unwrap_or(cur.len());
+                    let pos = eff_after
+                        .as_ref()
+                        .and_then(|a| cur.iter().position(|(i, _)| i == a))
+                        .map(|p| p + 1)
+                        .unwrap_or(cur.len());
                     cur.insert(pos, (id, text.clone()));
                 }
                 LineOp::Set { id, text } => {
@@ -117,13 +135,21 @@ mod diff_tests {
             }
         }
         let texts: Vec<String> = cur.iter().map(|(_, t)| t.clone()).collect();
-        assert_eq!(texts, new, "применённые дельты воспроизводят новый документ");
+        assert_eq!(
+            texts, new,
+            "применённые дельты воспроизводят новый документ"
+        );
     }
     #[test]
     fn insert_in_middle() {
-        let old = vec![("a#1".to_string(), "1".into()), ("a#2".to_string(), "3".into())];
+        let old = vec![
+            ("a#1".to_string(), "1".into()),
+            ("a#2".to_string(), "3".into()),
+        ];
         let new = vec!["1".to_string(), "2".into(), "3".into()];
         let ops = diff_lines(&old, &new);
-        assert!(ops.iter().any(|o| matches!(o, LineOp::Add { after, .. } if after.as_deref() == Some("a#1"))));
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, LineOp::Add { after, .. } if after.as_deref() == Some("a#1"))));
     }
 }

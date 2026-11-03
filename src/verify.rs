@@ -30,7 +30,10 @@ pub fn verify(path: &Path) -> Result<Vec<String>, String> {
     };
     let got = hash_slice(&b.mmap, 0, base_end)?;
     if got != b.base_hash {
-        issues.push(format!("base hash mismatch: got {got}, expected {}", b.base_hash));
+        issues.push(format!(
+            "base hash mismatch: got {got}, expected {}",
+            b.base_hash
+        ));
     }
 
     // 3. delta chains: per writer, each block hashes to its entry and chains
@@ -51,12 +54,18 @@ pub fn verify(path: &Path) -> Result<Vec<String>, String> {
             }
             match block_header(block, "X-Prev-Hash") {
                 Some(prev) if prev == expect => {}
-                Some(prev) => issues.push(format!("delta {writer}#{} chain break: prev={prev}, expected {expect}", e.seq)),
+                Some(prev) => issues.push(format!(
+                    "delta {writer}#{} chain break: prev={prev}, expected {expect}",
+                    e.seq
+                )),
                 None => issues.push(format!("delta {writer}#{} missing X-Prev-Hash", e.seq)),
             }
             match block_header(block, "X-Writer-ID") {
                 Some(w) if w == writer => {}
-                Some(w) => issues.push(format!("delta {writer}#{} header writer mismatch: {w}", e.seq)),
+                Some(w) => issues.push(format!(
+                    "delta {writer}#{} header writer mismatch: {w}",
+                    e.seq
+                )),
                 // старые контейнеры (до v0.2) не имели X-Writer-ID — это "local"
                 None if writer == "local" => {}
                 None => issues.push(format!("delta {writer}#{} missing X-Writer-ID", e.seq)),
@@ -76,7 +85,11 @@ pub fn verify(path: &Path) -> Result<Vec<String>, String> {
 
     // 4. trailer consistency
     if b.tail_seq as usize != b.tail_entries().len() {
-        issues.push(format!("trailer seq {} != tail entries {}", b.tail_seq, b.tail_entries().len()));
+        issues.push(format!(
+            "trailer seq {} != tail entries {}",
+            b.tail_seq,
+            b.tail_entries().len()
+        ));
     }
     if let Some(last) = b.tail_entries().last() {
         if !b.tail_hash.is_empty() && b.tail_hash != last.hash {

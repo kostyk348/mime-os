@@ -34,14 +34,10 @@ impl Record {
             .map(|(_, v)| v.trim().to_string())
             .collect();
         // dynamic tags from KV table `tags` (delta-appended)
-        if let Ok(t) = kv::table(b, "tags") {
-            if let serde_json::Value::Object(map) = t {
-                for (k, v) in &map {
-                    if v.as_bool().unwrap_or(false) || !v.is_null() {
-                        if !tags.contains(k) {
-                            tags.push(k.clone());
-                        }
-                    }
+        if let Ok(serde_json::Value::Object(map)) = kv::table(b, "tags") {
+            for (k, v) in &map {
+                if (v.as_bool().unwrap_or(false) || !v.is_null()) && !tags.contains(k) {
+                    tags.push(k.clone());
                 }
             }
         }
@@ -49,7 +45,10 @@ impl Record {
         let mut headers = b.headers.clone();
         // KV-теги видны X-Query как синтетические X-Tag-заголовки
         for t in &tags {
-            if !headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("X-Tag") && v == t) {
+            if !headers
+                .iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case("X-Tag") && v == t)
+            {
                 headers.push(("X-Tag".to_string(), t.clone()));
             }
         }
@@ -90,7 +89,7 @@ pub fn index(store: &Path) -> Result<(Vec<Record>, Vec<PathBuf>), String> {
 
 /// Evaluate an X-Query against the index (AND of clauses).
 pub fn eval<'a>(records: &'a [Record], query: &str) -> Result<Vec<&'a Record>, String> {
-    query::parse(query)?; // validate syntax once
+    query::validate(query)?; // validate syntax once (parens/NOT/OR allowed)
     Ok(records
         .iter()
         .filter(|r| query::eval_headers(&r.headers, query).unwrap_or(false))
@@ -115,7 +114,13 @@ pub fn mkdir(
         extra.push_str(&format!("X-Contains-ID: <{c}>\r\n"));
     }
     let path = store.join(format!("{name}.eml"));
-    crate::writer::build_file_with_headers(&path, &entity, &format!("dir: {name}"), &extra, vec![])?;
+    crate::writer::build_file_with_headers(
+        &path,
+        &entity,
+        &format!("dir: {name}"),
+        &extra,
+        vec![],
+    )?;
     Ok(path)
 }
 
@@ -132,7 +137,9 @@ pub fn resolve<'a>(records: &'a [Record], dir: &Record) -> Vec<&'a Record> {
     };
     for (k, v) in &dir.headers {
         if k.eq_ignore_ascii_case("X-Contains-ID") {
-            let id = v.trim_matches(|c| c == '<' || c == '>' || c == ' ').to_string();
+            let id = v
+                .trim_matches(|c| c == '<' || c == '>' || c == ' ')
+                .to_string();
             if let Some(r) = records.iter().find(|r| r.entity == id) {
                 push(r, &mut have, &mut out);
             }

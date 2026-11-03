@@ -19,7 +19,13 @@ pub struct Message {
 }
 
 /// Write an event message to the bus.
-pub fn send(bus: &Path, from: &str, to: &str, event: &str, body: &Value) -> Result<PathBuf, String> {
+pub fn send(
+    bus: &Path,
+    from: &str,
+    to: &str,
+    event: &str,
+    body: &Value,
+) -> Result<PathBuf, String> {
     std::fs::create_dir_all(bus).map_err(|e| e.to_string())?;
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -33,7 +39,11 @@ pub fn send(bus: &Path, from: &str, to: &str, event: &str, body: &Value) -> Resu
          X-EMLBox-Msg: v1\r\nContent-Type: application/json\r\n\r\n"
     )
     .into_bytes();
-    buf.extend_from_slice(serde_json::to_vec(body).map_err(|e| e.to_string())?.as_slice());
+    buf.extend_from_slice(
+        serde_json::to_vec(body)
+            .map_err(|e| e.to_string())?
+            .as_slice(),
+    );
     std::fs::write(&path, &buf).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -70,7 +80,10 @@ pub fn list(bus: &Path) -> Result<Vec<PathBuf>, String> {
     if let Ok(rd) = std::fs::read_dir(bus) {
         for e in rd.flatten() {
             let p = e.path();
-            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
             if name.ends_with(MSG_SUFFIX) && !name.ends_with(DONE_SUFFIX) {
                 out.push(p);
             }

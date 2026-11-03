@@ -16,9 +16,15 @@ fn tmp(tag: &str) -> PathBuf {
 
 #[test]
 fn deflate_roundtrip_and_smaller() {
-    let payload = b"hello world hello world hello world hello world hello world hello world hello world";
+    let payload =
+        b"hello world hello world hello world hello world hello world hello world hello world";
     let enc = encoding::encode("deflate", payload).unwrap();
-    assert!(enc.len() < payload.len(), "compressed {} < {}", enc.len(), payload.len());
+    assert!(
+        enc.len() < payload.len(),
+        "compressed {} < {}",
+        enc.len(),
+        payload.len()
+    );
     let dec = encoding::decode("deflate", &enc).unwrap();
     assert_eq!(dec, payload);
 }
@@ -61,7 +67,10 @@ fn encrypted_kv_database() {
     // на диске — шифр
     let raw = std::fs::read(&p).unwrap();
     let rawstr = String::from_utf8_lossy(&raw);
-    assert!(!rawstr.contains("balance"), "база на диске не должна содержать plaintext");
+    assert!(
+        !rawstr.contains("balance"),
+        "база на диске не должна содержать plaintext"
+    );
 
     // KV работает сквозь шифрование
     kv::set(&p, "state", "balance", json!(1000)).unwrap();
@@ -74,7 +83,10 @@ fn encrypted_kv_database() {
     // без ключа база не читается
     std::env::remove_var("EMLBOX_PASS");
     let b = emlbox::reader::EmlBox::open(&p).unwrap();
-    assert!(kv::get(&b, "state", "balance").is_err(), "без ключа — ошибка декодирования");
+    assert!(
+        kv::get(&b, "state", "balance").is_err(),
+        "без ключа — ошибка декодирования"
+    );
 }
 
 #[test]
@@ -95,7 +107,10 @@ fn deflate_section_readable() {
     )
     .unwrap();
     let b = emlbox::reader::EmlBox::open(&p).unwrap();
-    assert_eq!(String::from_utf8_lossy(&b.section("text").unwrap()).to_string(), body);
+    assert_eq!(
+        String::from_utf8_lossy(&b.section("text").unwrap()).to_string(),
+        body
+    );
     // файл существенно меньше 5000 байт тела
     let size = std::fs::metadata(&p).unwrap().len();
     assert!(size < 2000, "сжатая секция: file={size}");

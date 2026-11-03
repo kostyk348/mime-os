@@ -12,7 +12,18 @@ fn setup(tag: &str) -> (PathBuf, PathBuf) {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let base = dir.join("base.eml");
-    build_file(&base, "game@system.local", "game", vec![Part::raw("state", "application/json", "state.json", br#"{"x":0}"#.to_vec())]).unwrap();
+    build_file(
+        &base,
+        "game@system.local",
+        "game",
+        vec![Part::raw(
+            "state",
+            "application/json",
+            "state.json",
+            br#"{"x":0}"#.to_vec(),
+        )],
+    )
+    .unwrap();
     let a = dir.join("devA.eml");
     let b = dir.join("devB.eml");
     std::fs::copy(&base, &a).unwrap();

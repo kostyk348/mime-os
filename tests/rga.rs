@@ -12,7 +12,18 @@ fn setup(tag: &str) -> (PathBuf, PathBuf) {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let base = dir.join("base.eml");
-    build_file(&base, "g@system.local", "g", vec![Part::raw("log", "application/json", "log.json", br#"{"moves":[]}"#.to_vec())]).unwrap();
+    build_file(
+        &base,
+        "g@system.local",
+        "g",
+        vec![Part::raw(
+            "log",
+            "application/json",
+            "log.json",
+            br#"{"moves":[]}"#.to_vec(),
+        )],
+    )
+    .unwrap();
     let a = dir.join("a.eml");
     let b = dir.join("b.eml");
     std::fs::copy(&base, &a).unwrap();
@@ -50,7 +61,15 @@ fn rga_insert_after_specific_element() {
     // id первого элемента = "devA#1"
     kv::add(&a, "devA", "log", "moves", json!({"n": 3}), None).unwrap();
     // вставить {"n":2} ПОСЛЕ devA#1 → [1, 2, 3]
-    kv::add(&a, "devA", "log", "moves", json!({"n": 2}), Some("devA#1".into())).unwrap();
+    kv::add(
+        &a,
+        "devA",
+        "log",
+        "moves",
+        json!({"n": 2}),
+        Some("devA#1".into()),
+    )
+    .unwrap();
     let b = emlbox::reader::EmlBox::open(&a).unwrap();
     let l = kv::list(&b, "log", "moves").unwrap();
     let vals: Vec<i64> = l.iter().map(|v| v["n"].as_i64().unwrap()).collect();
