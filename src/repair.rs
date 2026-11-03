@@ -144,27 +144,37 @@ pub fn truncate_blocks(path: &Path, keep: usize) -> Result<(usize, usize), Strin
     if keep >= total {
         return Ok((total, 0));
     }
-    // после repair файл валиден: открываем и пересчитываем
-    let b = EmlBox::open(path)?;
-    let n = b.tail_entries().len();
-    if keep >= n {
-        return Ok((n, 0));
-    }
-    // пересобираем tail из первых keep записей
-    let entries: Vec<TailEntry> = b.tail_entries()[..keep].to_vec();
-    let last = entries.last().cloned().unwrap();
-    let new_tail_off = last.off + last.len;
-    let new_tail = TailIndex {
-        v: 1,
-        entries: entries.clone(),
+    // пересчитываем всё под mmap и закрываем его до открытия write-хэндла
+    // на тот же файл — иначе на Windows os error 1224
+    let (n, new_tail_off, new_tail_bytes, entity, base_hash, last_hash) = {
+        let b = EmlBox::open(path)?;
+        let n = b.tail_entries().len();
+        if keep >= n {
+            return Ok((n, 0));
+        }
+        // пересобираем tail из первых keep записей
+        let entries: Vec<TailEntry> = b.tail_entries()[..keep].to_vec();
+        let last = entries.last().cloned().unwrap();
+        let new_tail_off = last.off + last.len;
+        let new_tail = TailIndex { v: 1, entries };
+        let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
+        let entity = b.entity().unwrap_or_default();
+        let base_hash = b.base_hash.clone();
+        let last_hash = last.hash.clone();
+        (
+            n,
+            new_tail_off,
+            new_tail_bytes,
+            entity,
+            base_hash,
+            last_hash,
+        )
     };
-    let new_tail_bytes = serde_json::to_vec(&new_tail).map_err(|e| e.to_string())?;
-    let entity = b.entity().unwrap_or_default();
     let trailer = render_trailer(
         &entity,
-        new_tail.entries.len() as u64,
-        &b.base_hash,
-        &last.hash,
+        keep as u64,
+        &base_hash,
+        &last_hash,
         new_tail_off,
         new_tail_bytes.len() as u64,
     );
