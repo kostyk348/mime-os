@@ -132,6 +132,15 @@ pub fn find_blank(data: &[u8]) -> Option<(usize, usize)> {
             }
         }
     }
+    // CR-CR-LF pairs: a Windows text-mode write translated our own CRLFs
+    // into CR-CR-LF; tolerate the artifact instead of rejecting the message
+    if data.len() >= 8 {
+        for i in 0..data.len() - 7 {
+            if &data[i..i + 8] == b"\r\r\n\r\r\n" {
+                return Some((i, 8));
+            }
+        }
+    }
     if data.len() >= 2 {
         for i in 0..data.len() - 1 {
             if &data[i..i + 2] == b"\n\n" {

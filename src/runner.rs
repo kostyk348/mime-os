@@ -30,7 +30,10 @@ def emit(msg):
     ev = str(msg.get("event", "EVENT")).replace(" ", "_")
     body = msg.get("data", {})
     name = f"{int(time.time()*1e6)}_{os.getpid()}_{ev}.msg.eml"
-    with open(os.path.join(bus, name), "w") as f:
+    # newline="": keep the CRLFs we wrote ourselves — Windows text mode
+    # would turn them into CR-CR-LF and the bus parser would not find the
+    # blank line between headers and body
+    with open(os.path.join(bus, name), "w", newline="") as f:
         f.write(f"From: <{entity}@system.local>\r\nTo: <{to}>\r\nX-Event: {ev}\r\n"
                 f"X-EMLBox-Msg: v1\r\nContent-Type: application/json\r\n\r\n")
         f.write(json.dumps(body))
