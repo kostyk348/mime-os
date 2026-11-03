@@ -45,7 +45,9 @@ fn collect(root: &Path, cur: &Path, parts: &mut Vec<Part>, total: &mut u64) -> R
                 .strip_prefix(root)
                 .map_err(|e| e.to_string())?
                 .to_string_lossy()
-                .to_string();
+                .replace('\\', "/");
+            // section ids are portable identifiers: always forward slashes,
+            // so a container packed on Windows unpacks byte-for-byte anywhere
             let data = std::fs::read(&p).map_err(|e| format!("read {}: {e}", p.display()))?;
             *total += data.len() as u64;
             parts.push(Part::raw(&rel, mime_for(&p), &rel, data));
