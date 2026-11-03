@@ -29,8 +29,13 @@ fn deflate_roundtrip_and_smaller() {
     assert_eq!(dec, payload);
 }
 
+// env is process-global: the two aes tests mutate EMLBOX_KEY/EMLBOX_PASS and
+// cargo runs tests in parallel threads — serialize them on this mutex
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn aes_roundtrip_requires_key() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // без ключа — ошибка
     std::env::remove_var("EMLBOX_KEY");
     std::env::remove_var("EMLBOX_PASS");
@@ -49,6 +54,7 @@ fn aes_roundtrip_requires_key() {
 
 #[test]
 fn encrypted_kv_database() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("EMLBOX_PASS", "kv-secret");
     let p = tmp("kv");
     build_file(
