@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/kostyk348/mime-os/discussions
+    about: Ask anything, share a workflow, or propose a direction — Discussions is the place.
+  - name: Security issue
+    url: https://github.com/kostyk348/mime-os/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.
