@@ -2,10 +2,30 @@
 //! be reconstructed at any point — and the audit log reads straight from the
 //! file.
 
-use emlbox::writer::{build_file, Part};
+use emlbox::format::Delta;
+use emlbox::writer::{append_delta_w, build_file, Part};
 use emlbox::{kv, reader};
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Append a `set` delta with an explicit timestamp.
+///
+/// `kv::set_w` stamps `now()` in whole seconds, so the LWW tiebreak of a test
+/// that writes three deltas back to back depends on whether the run happens to
+/// cross a second boundary — and it does, on a slow runner. The contract under
+/// test is `(ts, writer)`, so the timestamps are given, not measured.
+fn set_at(path: &Path, writer: &str, key: &str, value: serde_json::Value, ts: u64) {
+    let d = Delta {
+        op: "set".to_string(),
+        table: "state".to_string(),
+        key: key.to_string(),
+        value,
+        ts,
+        id: None,
+        after: None,
+    };
+    append_delta_w(path, writer, &d).unwrap();
+}
 
 fn tmp(name: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
@@ -117,20 +137,49 @@ fn history_is_the_audit_log() {
 #[test]
 fn time_travel_across_writers_is_deterministic() {
     let p = fresh("writers");
-    kv::set_w(&p, "devA", "state", "x", json!(1)).unwrap();
-    kv::set_w(&p, "devB", "state", "x", json!(2)).unwrap();
-    kv::set_w(&p, "devA", "state", "x", json!(3)).unwrap();
+    // same (ts) on every write: the ordering must come from the writer id alone
+    set_at(&p, "devA", "x", json!(1), 1_000);
+    set_at(&p, "devB", "x", json!(2), 1_000);
+    set_at(&p, "devA", "x", json!(3), 1_000);
 
     let b = reader::EmlBox::open(&p).unwrap();
     // the replay order is fixed by (ts, writer): same prefixes on every read
     let first = kv::table_at(&b, "state", 2).unwrap();
     let second = kv::table_at(&b, "state", 2).unwrap();
     assert_eq!(first, second);
-    // LWW contract: same-second writes resolve by writer id (devB > devA),
+    // LWW contract: same-ts writes resolve by writer id (devB > devA),
     // so the final value is 2 no matter which writer appended last
     let final_v = kv::get(&b, "state", "x").unwrap();
     assert_eq!(final_v, Some(json!(2)));
     assert_eq!(kv::get_at(&b, "state", "x", 3).unwrap(), final_v);
+    drop(b);
+    std::fs::remove_file(&p).ok();
+}
+
+/// `kv::set_w` stamps the wall clock in whole seconds — the second-granular `ts`
+/// is what makes the tiebreak above necessary. Pin that shape down so a later
+/// change to milliseconds (or to a monotonic counter) is a deliberate one.
+#[test]
+fn set_w_stamps_whole_seconds() {
+    let p = fresh("stamp");
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    kv::set_w(&p, "devA", "state", "x", json!(1)).unwrap();
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let b = reader::EmlBox::open(&p).unwrap();
+    let h = kv::history(&b, "state", Some("x")).unwrap();
+    assert_eq!(h.len(), 1);
+    assert!(
+        h[0].ts >= before && h[0].ts <= after,
+        "ts {} outside [{before}, {after}]",
+        h[0].ts
+    );
     drop(b);
     std::fs::remove_file(&p).ok();
 }

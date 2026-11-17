@@ -14,7 +14,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: "Full build: library, binary, MCP server, integration tests"
         run: cargo build --all-targets --verbose
-      - name: "Full test suite (79 tests)"
+      - name: "Full test suite (80 tests)"
         run: cargo test --verbose
   checks:
     runs-on: ubuntu-latest
